@@ -205,6 +205,33 @@ app.post('/scrape', async (req, res) => {
   }
 });
 
+// Test ESPN search team by name
+app.get('/test-espn-search', async (req, res) => {
+  try {
+    const resp = await fetch('https://site.api.espn.com/apis/site/v2/sports/soccer/eng.1/teams?limit=100', {
+      headers: { 'User-Agent': 'Mozilla/5.0' }
+    });
+    const data = await resp.json();
+    const teams = data?.sports?.[0]?.leagues?.[0]?.teams || [];
+    res.json({ status: resp.status, count: teams.length, sample: teams.slice(0,3).map(t => ({ id: t.team.id, name: t.team.displayName })) });
+  } catch(e) {
+    res.json({ error: e.message });
+  }
+});
+
+// Test ESPN injuries
+app.get('/test-espn-injuries', async (req, res) => {
+  try {
+    const resp = await fetch('https://site.api.espn.com/apis/site/v2/sports/soccer/eng.1/teams/382/injuries', {
+      headers: { 'User-Agent': 'Mozilla/5.0' }
+    });
+    const data = await resp.json();
+    res.json({ status: resp.status, keys: Object.keys(data), sample: JSON.stringify(data).slice(0, 500) });
+  } catch(e) {
+    res.json({ error: e.message });
+  }
+});
+
 // Test ESPN team schedule/results
 app.get('/test-espn-results', async (req, res) => {
   try {
