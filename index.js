@@ -205,6 +205,26 @@ app.post('/scrape', async (req, res) => {
   }
 });
 
+// Test FlashScore injuries
+app.get('/test-flash-injuries', async (req, res) => {
+  try {
+    // Test avec Manchester City sur FlashScore
+    const resp = await fetch('https://www.flashscore.com/team/manchester-city/qjb7TUb5/squad/', {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml',
+        'Referer': 'https://www.flashscore.com/',
+      }
+    });
+    const text = await resp.text();
+    // Look for injury-related keywords
+    const hasInjury = text.includes('injury') || text.includes('injured') || text.includes('Injured');
+    res.json({ status: resp.status, ok: resp.ok, hasInjury, sample: text.slice(0, 300) });
+  } catch(e) {
+    res.json({ error: e.message });
+  }
+});
+
 // Test ESPN search team by name
 app.get('/test-espn-search', async (req, res) => {
   try {
