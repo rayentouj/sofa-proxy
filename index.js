@@ -205,6 +205,19 @@ app.post('/scrape', async (req, res) => {
   }
 });
 
+// Test ESPN team schedule/results
+app.get('/test-espn-results', async (req, res) => {
+  try {
+    const resp = await fetch('https://site.api.espn.com/apis/site/v2/sports/soccer/eng.1/teams/382/schedule', {
+      headers: { 'User-Agent': 'Mozilla/5.0' }
+    });
+    const data = await resp.json();
+    res.json({ status: resp.status, keys: Object.keys(data), sample: JSON.stringify(data).slice(0, 800) });
+  } catch(e) {
+    res.json({ error: e.message });
+  }
+});
+
 // Test ESPN team detail
 app.get('/test-espn-team', async (req, res) => {
   try {
