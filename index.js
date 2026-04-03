@@ -205,6 +205,35 @@ app.post('/scrape', async (req, res) => {
   }
 });
 
+// Test ESPN all sports
+app.get('/test-espn-all', async (req, res) => {
+  const endpoints = {
+    football_epl: 'https://site.api.espn.com/apis/site/v2/sports/soccer/eng.1/teams/364/record',
+    football_ucl: 'https://site.api.espn.com/apis/site/v2/sports/soccer/uefa.champions/teams',
+    basketball_nba: 'https://site.api.espn.com/apis/site/v2/sports/basketball/nba/teams/13/record',
+    hockey_nhl: 'https://site.api.espn.com/apis/site/v2/sports/hockey/nhl/teams/1/record',
+    baseball_mlb: 'https://site.api.espn.com/apis/site/v2/sports/baseball/mlb/teams/1/record',
+    tennis: 'https://site.api.espn.com/apis/site/v2/sports/tennis/atp/athletes',
+    mma_ufc: 'https://site.api.espn.com/apis/site/v2/sports/mma/ufc/athletes',
+    cricket: 'https://site.api.espn.com/apis/site/v2/sports/cricket/teams',
+    american_football: 'https://site.api.espn.com/apis/site/v2/sports/football/nfl/teams/1/record',
+  };
+
+  const results = {};
+  for (const [sport, url] of Object.entries(endpoints)) {
+    try {
+      const resp = await fetch(url, {
+        headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' }
+      });
+      const data = await resp.json();
+      results[sport] = { status: resp.status, sample: JSON.stringify(data).slice(0, 150) };
+    } catch(e) {
+      results[sport] = { error: e.message };
+    }
+  }
+  res.json(results);
+});
+
 // Test ESPN access
 app.get('/test-espn', async (req, res) => {
   try {
