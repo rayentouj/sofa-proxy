@@ -205,6 +205,40 @@ app.post('/scrape', async (req, res) => {
   }
 });
 
+// Test FlashScore CDN data endpoints
+app.get('/test-flash-cdn', async (req, res) => {
+  try {
+    const headers = {
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+      'Accept': '*/*',
+      'Referer': 'https://www.flashscore.com/',
+      'x-fsign': 'SW9D1eZo',
+    };
+
+    const results = {};
+    // Manchester City FlashScore ID is qjb7TUb5
+    const endpoints = [
+      'https://d.flashscore.com/x/feed/ss-4-qjb7TUb5-standings-home-away-1',
+      'https://d.flashscore.com/x/feed/to-4-qjb7TUb5',
+      'https://d.flashscore.com/x/feed/kl-4-qjb7TUb5',
+    ];
+
+    for (const url of endpoints) {
+      try {
+        const r = await fetch(url, { headers });
+        const text = await r.text();
+        results[url.split('/').pop()] = { status: r.status, sample: text.slice(0, 300) };
+      } catch(e) {
+        results[url.split('/').pop()] = { error: e.message };
+      }
+    }
+
+    res.json(results);
+  } catch(e) {
+    res.json({ error: e.message });
+  }
+});
+
 // Test FlashScore internal API
 app.get('/test-flash-api', async (req, res) => {
   try {
