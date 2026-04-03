@@ -205,6 +205,21 @@ app.post('/scrape', async (req, res) => {
   }
 });
 
+// Test FlashScore access
+app.get('/test-flash', async (req, res) => {
+  try {
+    const resp = await fetch('https://www.flashscore.com/', {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+      }
+    });
+    res.json({ status: resp.status, ok: resp.ok });
+  } catch(e) {
+    res.json({ error: e.message });
+  }
+});
+
 // Health check
 app.get('/health', (req, res) => res.json({ status: 'ok', timestamp: new Date().toISOString() }));
 
