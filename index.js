@@ -205,6 +205,42 @@ app.post('/scrape', async (req, res) => {
   }
 });
 
+// Test FlashScore internal API
+app.get('/test-flash-api', async (req, res) => {
+  try {
+    const headers = {
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+      'Accept': 'application/json, text/plain, */*',
+      'Referer': 'https://www.flashscore.com/',
+      'Origin': 'https://www.flashscore.com',
+      'x-fsign': 'SW9D1eZo',
+    };
+
+    const results = {};
+
+    // Test different internal endpoints
+    const endpoints = [
+      'https://www.flashscore.com/x/feed/proxy-local-tournaments-1-/en/',
+      'https://flashscore.com/x/req/m_0', 
+      'https://d.flashscore.com/x/feed/proxy-local-tournaments-1-/en/',
+    ];
+
+    for (const url of endpoints) {
+      try {
+        const r = await fetch(url, { headers });
+        const text = await r.text();
+        results[url] = { status: r.status, sample: text.slice(0, 200) };
+      } catch(e) {
+        results[url] = { error: e.message };
+      }
+    }
+
+    res.json(results);
+  } catch(e) {
+    res.json({ error: e.message });
+  }
+});
+
 // Test FlashScore injuries
 app.get('/test-flash-injuries', async (req, res) => {
   try {
