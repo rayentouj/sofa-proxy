@@ -205,6 +205,21 @@ app.post('/scrape', async (req, res) => {
   }
 });
 
+// Test ESPN access
+app.get('/test-espn', async (req, res) => {
+  try {
+    const resp = await fetch('https://site.api.espn.com/apis/site/v2/sports/soccer/eng.1/scoreboard', {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+      }
+    });
+    const data = await resp.json();
+    res.json({ status: resp.status, ok: resp.ok, sample: JSON.stringify(data).slice(0, 200) });
+  } catch(e) {
+    res.json({ error: e.message });
+  }
+});
+
 // Test FlashScore access
 app.get('/test-flash', async (req, res) => {
   try {
