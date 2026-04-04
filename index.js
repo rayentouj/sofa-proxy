@@ -1,5 +1,6 @@
 const express = require('express');
 const fetch = require('node-fetch');
+const puppeteer = require('puppeteer');
 const app = express();
 app.use(express.json());
 app.use((req, res, next) => {
@@ -124,7 +125,6 @@ async function scrapeMatch(homeTeam, awayTeam, sport) {
   const homeForm = calcForm(home.events, home.id);
   const awayForm = calcForm(away.events, away.id);
 
-  // H2H from home team events
   const h2hMatches = (home.events || []).filter(e =>
     (e.homeTeam?.id === home.id && e.awayTeam?.id === away.id) ||
     (e.homeTeam?.id === away.id && e.awayTeam?.id === home.id)
@@ -180,7 +180,6 @@ app.post('/scrape', async (req, res) => {
           enriched++;
           console.log(`  ✓ ${e.equipe_domicile} vs ${e.equipe_exterieur}`);
         } else {
-          // Mark as attempted so we don't retry forever
           await sbFetch(`events?id=eq.${e.id}`, {
             method: 'PATCH',
             body: JSON.stringify({
@@ -205,190 +204,22 @@ app.post('/scrape', async (req, res) => {
   }
 });
 
-// Test FlashScore CDN data endpoints
-app.get('/test-flash-cdn', async (req, res) => {
+// Test Puppeteer
+app.get('/test-puppeteer', async (req, res) => {
+  let browser;
   try {
-    const headers = {
-      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-      'Accept': '*/*',
-      'Referer': 'https://www.flashscore.com/',
-      'x-fsign': 'SW9D1eZo',
-    };
-
-    const results = {};
-    // Manchester City FlashScore ID is qjb7TUb5
-    const endpoints = [
-      'https://d.flashscore.com/x/feed/ss-4-qjb7TUb5-standings-home-away-1',
-      'https://d.flashscore.com/x/feed/to-4-qjb7TUb5',
-      'https://d.flashscore.com/x/feed/kl-4-qjb7TUb5',
-    ];
-
-    for (const url of endpoints) {
-      try {
-        const r = await fetch(url, { headers });
-        const text = await r.text();
-        results[url.split('/').pop()] = { status: r.status, sample: text.slice(0, 300) };
-      } catch(e) {
-        results[url.split('/').pop()] = { error: e.message };
-      }
-    }
-
-    res.json(results);
-  } catch(e) {
-    res.json({ error: e.message });
-  }
-});
-
-// Test FlashScore internal API
-app.get('/test-flash-api', async (req, res) => {
-  try {
-    const headers = {
-      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-      'Accept': 'application/json, text/plain, */*',
-      'Referer': 'https://www.flashscore.com/',
-      'Origin': 'https://www.flashscore.com',
-      'x-fsign': 'SW9D1eZo',
-    };
-
-    const results = {};
-
-    // Test different internal endpoints
-    const endpoints = [
-      'https://www.flashscore.com/x/feed/proxy-local-tournaments-1-/en/',
-      'https://flashscore.com/x/req/m_0', 
-      'https://d.flashscore.com/x/feed/proxy-local-tournaments-1-/en/',
-    ];
-
-    for (const url of endpoints) {
-      try {
-        const r = await fetch(url, { headers });
-        const text = await r.text();
-        results[url] = { status: r.status, sample: text.slice(0, 200) };
-      } catch(e) {
-        results[url] = { error: e.message };
-      }
-    }
-
-    res.json(results);
-  } catch(e) {
-    res.json({ error: e.message });
-  }
-});
-
-// Test FlashScore injuries
-app.get('/test-flash-injuries', async (req, res) => {
-  try {
-    // Test avec Manchester City sur FlashScore
-    const resp = await fetch('https://www.flashscore.com/team/manchester-city/qjb7TUb5/squad/', {
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        'Accept': 'text/html,application/xhtml+xml',
-        'Referer': 'https://www.flashscore.com/',
-      }
+    browser = await puppeteer.launch({
+      args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage'],
+      headless: true
     });
-    const text = await resp.text();
-    // Look for injury-related keywords
-    const hasInjury = text.includes('injury') || text.includes('injured') || text.includes('Injured');
-    res.json({ status: resp.status, ok: resp.ok, hasInjury, sample: text.slice(0, 300) });
+    const page = await browser.newPage();
+    await page.goto('https://www.flashscore.com/', { waitUntil: 'domcontentloaded', timeout: 15000 });
+    const title = await page.title();
+    res.json({ ok: true, title });
   } catch(e) {
     res.json({ error: e.message });
-  }
-});
-
-// Test ESPN search team by name
-app.get('/test-espn-search', async (req, res) => {
-  try {
-    const resp = await fetch('https://site.api.espn.com/apis/site/v2/sports/soccer/eng.1/teams?limit=100', {
-      headers: { 'User-Agent': 'Mozilla/5.0' }
-    });
-    const data = await resp.json();
-    const teams = data?.sports?.[0]?.leagues?.[0]?.teams || [];
-    res.json({ status: resp.status, count: teams.length, sample: teams.slice(0,3).map(t => ({ id: t.team.id, name: t.team.displayName })) });
-  } catch(e) {
-    res.json({ error: e.message });
-  }
-});
-
-// Test ESPN injuries
-app.get('/test-espn-injuries', async (req, res) => {
-  try {
-    const resp = await fetch('https://site.api.espn.com/apis/site/v2/sports/soccer/eng.1/teams/382/injuries', {
-      headers: { 'User-Agent': 'Mozilla/5.0' }
-    });
-    const data = await resp.json();
-    res.json({ status: resp.status, keys: Object.keys(data), sample: JSON.stringify(data).slice(0, 500) });
-  } catch(e) {
-    res.json({ error: e.message });
-  }
-});
-
-// Test ESPN team schedule/results
-app.get('/test-espn-results', async (req, res) => {
-  try {
-    const resp = await fetch('https://site.api.espn.com/apis/site/v2/sports/soccer/eng.1/teams/382/schedule', {
-      headers: { 'User-Agent': 'Mozilla/5.0' }
-    });
-    const data = await resp.json();
-    res.json({ status: resp.status, keys: Object.keys(data), sample: JSON.stringify(data).slice(0, 800) });
-  } catch(e) {
-    res.json({ error: e.message });
-  }
-});
-
-// Test ESPN team detail
-app.get('/test-espn-team', async (req, res) => {
-  try {
-    const resp = await fetch('https://site.api.espn.com/apis/site/v2/sports/soccer/eng.1/teams/382', {
-      headers: { 'User-Agent': 'Mozilla/5.0' }
-    });
-    const data = await resp.json();
-    res.json({ status: resp.status, keys: Object.keys(data), sample: JSON.stringify(data).slice(0, 500) });
-  } catch(e) {
-    res.json({ error: e.message });
-  }
-});
-
-// Test ESPN all sports
-app.get('/test-espn-all', async (req, res) => {
-  const endpoints = {
-    football_epl: 'https://site.api.espn.com/apis/site/v2/sports/soccer/eng.1/teams/364/record',
-    football_ucl: 'https://site.api.espn.com/apis/site/v2/sports/soccer/uefa.champions/teams',
-    basketball_nba: 'https://site.api.espn.com/apis/site/v2/sports/basketball/nba/teams/13/record',
-    hockey_nhl: 'https://site.api.espn.com/apis/site/v2/sports/hockey/nhl/teams/1/record',
-    baseball_mlb: 'https://site.api.espn.com/apis/site/v2/sports/baseball/mlb/teams/1/record',
-    tennis: 'https://site.api.espn.com/apis/site/v2/sports/tennis/atp/athletes',
-    mma_ufc: 'https://site.api.espn.com/apis/site/v2/sports/mma/ufc/athletes',
-    cricket: 'https://site.api.espn.com/apis/site/v2/sports/cricket/teams',
-    american_football: 'https://site.api.espn.com/apis/site/v2/sports/football/nfl/teams/1/record',
-  };
-
-  const results = {};
-  for (const [sport, url] of Object.entries(endpoints)) {
-    try {
-      const resp = await fetch(url, {
-        headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' }
-      });
-      const data = await resp.json();
-      results[sport] = { status: resp.status, sample: JSON.stringify(data).slice(0, 150) };
-    } catch(e) {
-      results[sport] = { error: e.message };
-    }
-  }
-  res.json(results);
-});
-
-// Test ESPN access
-app.get('/test-espn', async (req, res) => {
-  try {
-    const resp = await fetch('https://site.api.espn.com/apis/site/v2/sports/soccer/eng.1/scoreboard', {
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-      }
-    });
-    const data = await resp.json();
-    res.json({ status: resp.status, ok: resp.ok, sample: JSON.stringify(data).slice(0, 200) });
-  } catch(e) {
-    res.json({ error: e.message });
+  } finally {
+    if(browser) await browser.close();
   }
 });
 
@@ -402,6 +233,19 @@ app.get('/test-flash', async (req, res) => {
       }
     });
     res.json({ status: resp.status, ok: resp.ok });
+  } catch(e) {
+    res.json({ error: e.message });
+  }
+});
+
+// Test ESPN access
+app.get('/test-espn', async (req, res) => {
+  try {
+    const resp = await fetch('https://site.api.espn.com/apis/site/v2/sports/soccer/eng.1/scoreboard', {
+      headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' }
+    });
+    const data = await resp.json();
+    res.json({ status: resp.status, ok: resp.ok, sample: JSON.stringify(data).slice(0, 200) });
   } catch(e) {
     res.json({ error: e.message });
   }
