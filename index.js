@@ -1,6 +1,5 @@
 const express = require('express');
 const fetch = require('node-fetch');
-const puppeteer = require('puppeteer');
 const app = express();
 app.use(express.json());
 app.use((req, res, next) => {
@@ -201,25 +200,6 @@ app.post('/scrape', async (req, res) => {
     res.json({ total: events.length, enriched, skipped, errors });
   } catch(err) {
     res.status(500).json({ error: err.message });
-  }
-});
-
-// Test Puppeteer
-app.get('/test-puppeteer', async (req, res) => {
-  let browser;
-  try {
-    browser = await puppeteer.launch({
-      args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage'],
-      headless: true
-    });
-    const page = await browser.newPage();
-    await page.goto('https://www.flashscore.com/', { waitUntil: 'domcontentloaded', timeout: 15000 });
-    const title = await page.title();
-    res.json({ ok: true, title });
-  } catch(e) {
-    res.json({ error: e.message });
-  } finally {
-    if(browser) await browser.close();
   }
 });
 
