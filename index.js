@@ -203,6 +203,109 @@ app.post('/scrape', async (req, res) => {
   }
 });
 
+// Test Transfermarkt injuries
+app.get('/test-transfermarkt', async (req, res) => {
+  try {
+    const resp = await fetch('https://www.transfermarkt.fr/ligue-1/verletztespieler/wettbewerb/FR1', {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml',
+        'Accept-Language': 'fr-FR,fr;q=0.9',
+        'Referer': 'https://www.transfermarkt.fr/',
+      }
+    });
+    const text = await resp.text();
+    const hasInjury = text.includes('bless') || text.includes('injury') || text.includes('verletzte');
+    res.json({ status: resp.status, ok: resp.ok, length: text.length, hasInjury, sample: text.slice(0, 300) });
+  } catch(e) {
+    res.json({ error: e.message });
+  }
+});
+
+// Test FlashScore squad endpoint
+app.get('/test-flash-squad', async (req, res) => {
+  try {
+    const headers = {
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+      'Accept': '*/*',
+      'Referer': 'https://www.flashscore.com/',
+      'x-fsign': 'SW9D1eZo',
+    };
+    const results = {};
+    const endpoints = [
+      'https://16.flashscore.ninja/16/x/feed/p_1_198_Wtn9Stg0_2_en_1',
+      'https://16.flashscore.ninja/16/x/feed/tetr_Wtn9Stg0_1_1',
+    ];
+    for (const url of endpoints) {
+      const r = await fetch(url, { headers });
+      const text = await r.text();
+      results[url.split('feed/')[1]] = { status: r.status, length: text.length, sample: text.slice(0, 500) };
+    }
+    res.json(results);
+  } catch(e) {
+    res.json({ error: e.message });
+  }
+});
+
+// Test FlashScore GraphQL player injuries
+app.get('/test-flash-player', async (req, res) => {
+  try {
+    const headers = {
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+      'Accept': 'application/json',
+      'Referer': 'https://www.flashscore.com/',
+    };
+
+    // Test Gvardiol injury data
+    const url = 'https://16.ds.lsapp.eu/pq_graphql?_hash=fsnulae&projectId=16&entityId=86K1f1fd&entityTypeId=42&layoutTypeId=2&page=1&perPage=20';
+    const r = await fetch(url, { headers });
+    const data = await r.json();
+    res.json({ status: r.status, keys: Object.keys(data), sample: JSON.stringify(data).slice(0, 500) });
+  } catch(e) {
+    res.json({ error: e.message });
+  }
+});
+
+// Test FlashScore GraphQL API
+app.get('/test-flash-graphql', async (req, res) => {
+  try {
+    const headers = {
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+      'Accept': 'application/json',
+      'Referer': 'https://www.flashscore.com/',
+      'Origin': 'https://www.flashscore.com',
+    };
+
+    const results = {};
+    // Test different entityTypeId for Manchester City (Wtn9Stg0)
+    const endpoints = [
+      // Squad/players list
+      'https://16.ds.lsapp.eu/pq_graphql?_hash=fsnulae&projectId=16&entityId=Wtn9Stg0&entityTypeId=2&layoutTypeId=2&page=1&perPage=20',
+      // Team injuries
+      'https://16.ds.lsapp.eu/pq_graphql?_hash=fsnulae&projectId=16&entityId=Wtn9Stg0&entityTypeId=3&layoutTypeId=2&page=1&perPage=20',
+      // News feed already works
+      'https://16.flashscore.ninja/16/x/feed/pnf_Wtn9Stg0',
+    ];
+
+    for (const url of endpoints) {
+      try {
+        const r = await fetch(url, { headers });
+        const text = await r.text();
+        results[url.split('?')[0].split('/').pop() + '_' + url.split('entityTypeId=')[1]?.split('&')[0]] = {
+          status: r.status,
+          length: text.length,
+          sample: text.slice(0, 300)
+        };
+      } catch(e) {
+        results[url] = { error: e.message };
+      }
+    }
+    res.json(results);
+  } catch(e) {
+    res.json({ error: e.message });
+  }
+});
+
 // Test FlashScore ninja endpoint
 app.get('/test-flash-ninja', async (req, res) => {
   try {
