@@ -203,6 +203,29 @@ app.post('/scrape', async (req, res) => {
   }
 });
 
+// Test ESPN injuries sports US
+app.get('/test-espn-injuries-us', async (req, res) => {
+  try {
+    const headers = { 'User-Agent': 'Mozilla/5.0' };
+    const results = {};
+    const endpoints = {
+      nba_lakers: 'https://site.api.espn.com/apis/site/v2/sports/basketball/nba/teams/13/injuries',
+      nhl_bruins: 'https://site.api.espn.com/apis/site/v2/sports/hockey/nhl/teams/1/injuries',
+      mlb_yankees: 'https://site.api.espn.com/apis/site/v2/sports/baseball/mlb/teams/10/injuries',
+      nfl_chiefs: 'https://site.api.espn.com/apis/site/v2/sports/football/nfl/teams/12/injuries',
+      nba_lakers_roster: 'https://site.api.espn.com/apis/site/v2/sports/basketball/nba/teams/13/roster',
+    };
+    for (const [key, url] of Object.entries(endpoints)) {
+      const r = await fetch(url, { headers });
+      const data = await r.json();
+      results[key] = { status: r.status, keys: Object.keys(data), sample: JSON.stringify(data).slice(0, 200) };
+    }
+    res.json(results);
+  } catch(e) {
+    res.json({ error: e.message });
+  }
+});
+
 // Test Transfermarkt injuries
 app.get('/test-transfermarkt', async (req, res) => {
   try {
