@@ -223,6 +223,40 @@ app.get('/test-puppeteer', async (req, res) => {
   }
 });
 
+// Test FlashScore ninja endpoint
+app.get('/test-flash-ninja', async (req, res) => {
+  try {
+    const headers = {
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+      'Accept': '*/*',
+      'Referer': 'https://www.flashscore.com/',
+      'Origin': 'https://www.flashscore.com',
+      'x-fsign': 'SW9D1eZo',
+    };
+
+    const results = {};
+    // Wtn9Stg0 = Manchester City ID on FlashScore
+    const endpoints = [
+      'https://16.flashscore.ninja/16/x/feed/pnf_Wtn9Stg0',
+      'https://16.flashscore.ninja/16/x/feed/tm_Wtn9Stg0',
+      'https://16.flashscore.ninja/16/x/feed/ps_Wtn9Stg0',
+    ];
+
+    for (const url of endpoints) {
+      try {
+        const r = await fetch(url, { headers });
+        const text = await r.text();
+        results[url.split('feed/')[1]] = { status: r.status, length: text.length, sample: text.slice(0, 400) };
+      } catch(e) {
+        results[url.split('feed/')[1]] = { error: e.message };
+      }
+    }
+    res.json(results);
+  } catch(e) {
+    res.json({ error: e.message });
+  }
+});
+
 // Test FlashScore access
 app.get('/test-flash', async (req, res) => {
   try {
