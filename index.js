@@ -203,6 +203,27 @@ app.post('/scrape', async (req, res) => {
   }
 });
 
+// Test ESPN athlete injury status in roster
+app.get('/test-espn-roster-injury', async (req, res) => {
+  try {
+    const r = await fetch('https://site.api.espn.com/apis/site/v2/sports/basketball/nba/teams/13/roster', {
+      headers: { 'User-Agent': 'Mozilla/5.0' }
+    });
+    const data = await r.json();
+    const athletes = data.athletes || [];
+    // Check if any athlete has injury info
+    const sample = athletes.slice(0, 3).map(a => ({
+      name: a.displayName || a.fullName,
+      status: a.status,
+      injuries: a.injuries,
+      keys: Object.keys(a)
+    }));
+    res.json({ total: athletes.length, sample });
+  } catch(e) {
+    res.json({ error: e.message });
+  }
+});
+
 // Test ESPN injuries sports US
 app.get('/test-espn-injuries-us', async (req, res) => {
   try {
