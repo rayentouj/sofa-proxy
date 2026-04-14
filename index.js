@@ -1,5 +1,6 @@
 const express = require('express');
 const fetch = require('node-fetch');
+const cheerio = require('cheerio');
 const app = express();
 app.use(express.json());
 app.use((req, res, next) => {
@@ -13,17 +14,7 @@ app.use((req, res, next) => {
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_KEY = process.env.SUPABASE_SERVICE_KEY;
 
-const SPORT_SLUG = {
-  football: 'football',
-  basketball: 'basketball',
-  hockey: 'ice-hockey',
-  baseball: 'baseball',
-  tennis: 'tennis',
-  mma: 'mma',
-  rugby: 'rugby',
-  american_football: 'american-football',
-  cricket: 'cricket',
-};
+// ── HELPERS ──────────────────────────────────────────────────────────────────
 
 async function sbFetch(path, options = {}) {
   const resp = await fetch(`${SUPABASE_URL}/rest/v1/${path}`, {
@@ -40,116 +31,327 @@ async function sbFetch(path, options = {}) {
   return resp.json();
 }
 
-async function sofaFetch(endpoint) {
+async function safeFetch(url, headers = {}) {
   try {
-    const resp = await fetch(`https://api.sofascore.com/api/v1/${endpoint}`, {
+    const resp = await fetch(url, {
       headers: {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        'Accept': 'application/json',
-        'Referer': 'https://www.sofascore.com/',
-        'Origin': 'https://www.sofascore.com',
+        'Accept': '*/*',
+        ...headers
       }
     });
-    if (!resp.ok) {
-      console.log(`Sofascore ${resp.status} for ${endpoint}`);
-      return null;
-    }
-    return resp.json();
+    return resp;
   } catch(e) {
-    console.error('Sofascore fetch error:', e.message);
+    console.error(`Fetch error for ${url}:`, e.message);
     return null;
   }
 }
 
-async function getTeamId(teamName, sportSlug) {
-  const data = await sofaFetch(`search/all?q=${encodeURIComponent(teamName)}&page=0`);
-  if (!data?.results) return null;
-  const teams = data.results.filter(r => r.type === 'team' && r.entity?.sport?.slug === sportSlug);
-  if (teams.length === 0) return null;
-  const normalized = teamName.toLowerCase();
-  const exact = teams.find(t =>
-    t.entity?.name?.toLowerCase() === normalized ||
-    t.entity?.shortName?.toLowerCase() === normalized
+function delay(ms) { return new Promise(r => setTimeout(r, ms)); }
+
+// ── TRANSFERMARKT (Football injuries) ────────────────────────────────────────
+
+const TM_LEAGUE_CODES = {
+  'Premier League': 'GB1', 'La Liga': 'ES1', 'Bundesliga': 'L1',
+  'Serie A': 'IT1', 'Ligue 1': 'FR1', 'Eredivisie': 'NL1',
+  'Primeira Liga': 'PO1', 'Super Lig': 'TR1', 'Championship': 'GB2',
+  'League One': 'GB3', 'League Two': 'GB4', 'Scottish Premiership': 'SC1',
+  'Saudi Pro League': 'SA1', 'MLS': 'MLS1', 'Brasileirao': 'BRA1',
+  'Liga MX': 'MEX1', 'Argentine Primera División': 'AR1N',
+  'FA Cup': 'GBFAC', 'EFL Cup': 'GBLC',
+  'UEFA Champions League': 'CL', 'UEFA Europa League': 'EL',
+  'UEFA Conference League': 'UECL',
+};
+
+const injuryCache = {};
+
+async function fetchTransfermarktInjuries(leagueCode) {
+  if (injuryCache[leagueCode]) return injuryCache[leagueCode];
+
+  const url = `https://www.transfermarkt.com/a/verletztespieler/wettbewerb/${leagueCode}`;
+  const resp = await safeFetch(url, {
+    'Accept': 'text/html,application/xhtml+xml',
+    'Referer': 'https://www.transfermarkt.com/',
+    'Accept-Language': 'en-US,en;q=0.9',
+  });
+  if (!resp || !resp.ok) return {};
+
+  const html = await resp.text();
+  const $ = cheerio.load(html);
+  const injuries = {};
+
+  $('table.items tbody tr').each((_, row) => {
+    const cells = $(row).find('td');
+    if (cells.length < 5) return;
+
+    const playerName = $(cells[1]).find('a').first().text().trim();
+    const position = $(cells[2]).text().trim();
+    const teamName = $(cells[3]).find('a').first().text().trim();
+    const injuryType = $(cells[4]).text().trim();
+    const returnDate = $(cells[5]).text().trim();
+    const valueText = $(cells[6]).text().trim();
+
+    if (!playerName || !teamName) return;
+
+    let value = 0;
+    const vm = valueText.replace(/[€$£]/g, '').trim();
+    if (vm.includes('m')) value = parseFloat(vm) || 0;
+    else if (vm.includes('k')) value = (parseFloat(vm) || 0) / 1000;
+
+    if (!injuries[teamName]) injuries[teamName] = [];
+    injuries[teamName].push({ name: playerName, position, injury: injuryType, returnDate, value });
+  });
+
+  injuryCache[leagueCode] = injuries;
+  return injuries;
+}
+
+function getInjuryImpact(player, allPlayers) {
+  const sorted = [...allPlayers].sort((a, b) => b.value - a.value);
+  const top5 = sorted.slice(0, 5).map(p => p.name);
+  const avgValue = allPlayers.reduce((s, p) => s + p.value, 0) / (allPlayers.length || 1);
+  if (top5.includes(player.name)) return 'high';
+  if (player.value > avgValue * 0.5) return 'medium';
+  return 'low';
+}
+
+async function getFootballInjuries(teamName, competition) {
+  const leagueCode = TM_LEAGUE_CODES[competition];
+  if (!leagueCode) return null;
+
+  const injuries = await fetchTransfermarktInjuries(leagueCode);
+
+  const teamKey = Object.keys(injuries).find(t =>
+    t.toLowerCase().includes(teamName.toLowerCase().split(' ')[0]) ||
+    teamName.toLowerCase().includes(t.toLowerCase().split(' ')[0])
   );
-  return exact?.entity?.id || teams[0]?.entity?.id || null;
+  if (!teamKey) return null;
+
+  const teamInjuries = injuries[teamKey];
+  if (!teamInjuries?.length) return null;
+
+  const result = teamInjuries
+    .map(p => ({ ...p, impact: getInjuryImpact(p, teamInjuries) }))
+    .filter(p => p.impact !== 'low')
+    .slice(0, 6);
+
+  if (!result.length) return null;
+
+  return result.map(p =>
+    `${p.name} (${p.impact}${p.returnDate ? ', retour: ' + p.returnDate : ''}${p.injury ? ', ' + p.injury : ''})`
+  ).join('; ');
 }
 
-function calcForm(events, teamId) {
-  const finished = (events || []).filter(e => e.status?.type === 'finished').slice(0, 5);
+// ── ESPN (Sports US injuries + form) ─────────────────────────────────────────
+
+const ESPN_SPORT_CONFIG = {
+  basketball: { sport: 'basketball', league: 'nba' },
+  hockey:     { sport: 'hockey',     league: 'nhl' },
+  baseball:   { sport: 'baseball',   league: 'mlb' },
+  american_football: { sport: 'football', league: 'nfl' },
+};
+
+async function findESPNTeam(teamName, sport, league) {
+  const resp = await safeFetch(`https://site.api.espn.com/apis/site/v2/sports/${sport}/${league}/teams?limit=100`);
+  if (!resp?.ok) return null;
+  const data = await resp.json();
+  const teams = data?.sports?.[0]?.leagues?.[0]?.teams || [];
+  const normalized = teamName.toLowerCase();
+  const found = teams.find(t =>
+    t.team?.displayName?.toLowerCase() === normalized ||
+    t.team?.shortDisplayName?.toLowerCase() === normalized ||
+    t.team?.name?.toLowerCase() === normalized ||
+    t.team?.displayName?.toLowerCase().includes(normalized) ||
+    normalized.includes(t.team?.name?.toLowerCase())
+  );
+  return found?.team?.id || null;
+}
+
+async function getESPNInjuries(teamId, sport, league) {
+  const resp = await safeFetch(`https://site.api.espn.com/apis/site/v2/sports/${sport}/${league}/teams/${teamId}/roster`);
+  if (!resp?.ok) return null;
+  const data = await resp.json();
+  const athletes = data?.athletes || [];
+
+  const injured = athletes.filter(a => a.injuries?.length > 0);
+  if (!injured.length) return null;
+
+  const starters = athletes.slice(0, 10).map(a => a.displayName || a.fullName);
+
+  return injured.map(p => {
+    const impact = starters.includes(p.displayName || p.fullName) ? 'high' : 'medium';
+    const status = p.injuries?.[0]?.status || 'Out';
+    return `${p.displayName || p.fullName} (${impact}, ${status})`;
+  }).join('; ');
+}
+
+async function getESPNForm(teamId, sport, league) {
+  const resp = await safeFetch(`https://site.api.espn.com/apis/site/v2/sports/${sport}/${league}/teams/${teamId}/schedule`);
+  if (!resp?.ok) return null;
+  const data = await resp.json();
+  const events = data?.events || [];
+
+  const completed = events.filter(e => e.competitions?.[0]?.status?.type?.completed).slice(-5);
+  if (!completed.length) return null;
+
   let form = '', scored = 0, conceded = 0;
-  for (const e of finished) {
-    const isHome = e.homeTeam?.id === teamId;
-    const hg = e.homeScore?.current ?? 0;
-    const ag = e.awayScore?.current ?? 0;
-    scored += isHome ? hg : ag;
-    conceded += isHome ? ag : hg;
-    if (isHome) form += hg > ag ? 'W' : hg === ag ? 'D' : 'L';
-    else form += ag > hg ? 'W' : ag === hg ? 'D' : 'L';
-  }
-  return { form, scored, conceded };
-}
-
-async function scrapeTeam(teamName, sport) {
-  const sportSlug = SPORT_SLUG[sport] || 'football';
-  await new Promise(r => setTimeout(r, 500));
-  const teamId = await getTeamId(teamName, sportSlug);
-  if (!teamId) return { id: null, events: null, injuries: null };
-
-  await new Promise(r => setTimeout(r, 300));
-  const [eventsData, injData] = await Promise.all([
-    sofaFetch(`team/${teamId}/events/last/0`),
-    sofaFetch(`team/${teamId}/players/missing`).catch(() => null),
-  ]);
-
-  return {
-    id: teamId,
-    events: eventsData?.events || [],
-    injuries: injData?.missingPlayers || [],
-  };
-}
-
-async function scrapeMatch(homeTeam, awayTeam, sport) {
-  console.log(`Scraping ${homeTeam} vs ${awayTeam} (${sport})`);
-
-  const [home, away] = await Promise.all([
-    scrapeTeam(homeTeam, sport),
-    scrapeTeam(awayTeam, sport),
-  ]);
-
-  if (!home.id || !away.id) {
-    console.log(`  IDs not found: ${homeTeam}=${home.id}, ${awayTeam}=${away.id}`);
-    return null;
+  for (const event of completed) {
+    const comp = event.competitions?.[0];
+    const ourTeam = comp?.competitors?.find(c => c.team?.id === String(teamId));
+    const oppTeam = comp?.competitors?.find(c => c.team?.id !== String(teamId));
+    if (!ourTeam || !oppTeam) continue;
+    const ourScore = parseInt(ourTeam.score) || 0;
+    const oppScore = parseInt(oppTeam.score) || 0;
+    scored += ourScore;
+    conceded += oppScore;
+    form += ourScore > oppScore ? 'W' : ourScore < oppScore ? 'L' : 'D';
   }
 
-  const homeForm = calcForm(home.events, home.id);
-  const awayForm = calcForm(away.events, away.id);
+  return form ? `${form} (${scored} scored, ${conceded} conceded)` : null;
+}
 
-  const h2hMatches = (home.events || []).filter(e =>
-    (e.homeTeam?.id === home.id && e.awayTeam?.id === away.id) ||
-    (e.homeTeam?.id === away.id && e.awayTeam?.id === home.id)
-  ).slice(0, 5);
+// ── FLASHSCORE (news for individual sports) ───────────────────────────────────
 
-  const h2hStr = h2hMatches.length > 0
-    ? h2hMatches.map(e =>
-        `${e.homeTeam?.shortName || e.homeTeam?.name} ${e.homeScore?.current}-${e.awayScore?.current} ${e.awayTeam?.shortName || e.awayTeam?.name}`
-      ).join(' | ')
-    : null;
+const flashHeaders = {
+  'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+  'Referer': 'https://www.flashscore.com/',
+  'x-fsign': 'SW9D1eZo',
+};
 
-  const homeInjStr = home.injuries.slice(0, 5).map(p => p.player?.name).filter(Boolean).join(', ') || null;
-  const awayInjStr = away.injuries.slice(0, 5).map(p => p.player?.name).filter(Boolean).join(', ') || null;
+async function searchFlashscoreEntity(name) {
+  const resp = await safeFetch(
+    `https://s.flashscore.com/search/?q=${encodeURIComponent(name)}&l=1&s=1&f=1%3B1&pid=2&sid=1`,
+    { 'Accept': 'application/json' }
+  );
+  if (!resp?.ok) return null;
+  const text = await resp.text();
+  const match = text.match(/~([A-Za-z0-9]{8})~/);
+  return match ? match[1] : null;
+}
+
+async function getFlashscoreNews(entityId) {
+  const resp = await safeFetch(
+    `https://16.flashscore.ninja/16/x/feed/pnf_${entityId}`,
+    flashHeaders
+  );
+  if (!resp?.ok) return null;
+  const text = await resp.text();
+  if (!text || text.length < 10) return null;
+
+  const titles = [];
+  const parts = text.split('PV÷');
+  for (const part of parts) {
+    if (part.length > 20 && part.length < 200 && !part.includes('http') && !part.includes('.jpeg') && !part.includes('.png')) {
+      const title = part.split('¬')[0].trim();
+      if (title.length > 20 && !title.includes('÷')) titles.push(title);
+    }
+  }
+  return titles.slice(0, 3).join(' | ') || null;
+}
+
+// ── MAIN SCRAPE LOGIC ─────────────────────────────────────────────────────────
+
+async function scrapeFootball(event) {
+  const { equipe_domicile: home, equipe_exterieur: away, competition } = event;
+
+  const [homeInj, awayInj] = await Promise.all([
+    getFootballInjuries(home, competition),
+    getFootballInjuries(away, competition),
+  ]);
+
+  await delay(500);
+  const [homeId, awayId] = await Promise.all([
+    searchFlashscoreEntity(home),
+    searchFlashscoreEntity(away),
+  ]);
+
+  let homeNews = null, awayNews = null;
+  if (homeId) { await delay(300); homeNews = await getFlashscoreNews(homeId); }
+  if (awayId) { await delay(300); awayNews = await getFlashscoreNews(awayId); }
+
+  const news = [homeNews, awayNews].filter(Boolean).join(' | ') || null;
+  const hasData = homeInj || awayInj || news;
+  if (!hasData) return null;
 
   return {
-    home_form: homeForm.form ? `${homeForm.form} (${homeForm.scored} scored, ${homeForm.conceded} conceded)` : null,
-    away_form: awayForm.form ? `${awayForm.form} (${awayForm.scored} scored, ${awayForm.conceded} conceded)` : null,
-    h2h: h2hStr,
-    home_injuries: homeInjStr,
-    away_injuries: awayInjStr,
-    context_source: 'sofascore',
+    home_form: null,
+    away_form: null,
+    h2h: null,
+    home_injuries: homeInj,
+    away_injuries: awayInj,
+    news,
+    context_source: 'transfermarkt+flashscore',
     context_updated_at: new Date().toISOString(),
   };
 }
 
-// Main scrape endpoint
+async function scrapeUSsport(event) {
+  const { equipe_domicile: home, equipe_exterieur: away, sport } = event;
+  const config = ESPN_SPORT_CONFIG[sport];
+  if (!config) return null;
+
+  const [homeId, awayId] = await Promise.all([
+    findESPNTeam(home, config.sport, config.league),
+    findESPNTeam(away, config.sport, config.league),
+  ]);
+  if (!homeId || !awayId) return null;
+
+  const [homeInj, awayInj, homeForm, awayForm] = await Promise.all([
+    getESPNInjuries(homeId, config.sport, config.league),
+    getESPNInjuries(awayId, config.sport, config.league),
+    getESPNForm(homeId, config.sport, config.league),
+    getESPNForm(awayId, config.sport, config.league),
+  ]);
+
+  if (!homeInj && !awayInj && !homeForm && !awayForm) return null;
+
+  return {
+    home_form: homeForm,
+    away_form: awayForm,
+    h2h: null,
+    home_injuries: homeInj,
+    away_injuries: awayInj,
+    news: null,
+    context_source: 'espn',
+    context_updated_at: new Date().toISOString(),
+  };
+}
+
+async function scrapeIndividualSport(event) {
+  const { equipe_domicile: p1, equipe_exterieur: p2 } = event;
+
+  const [p1Id, p2Id] = await Promise.all([
+    searchFlashscoreEntity(p1),
+    searchFlashscoreEntity(p2),
+  ]);
+
+  const [p1News, p2News] = await Promise.all([
+    p1Id ? getFlashscoreNews(p1Id) : null,
+    p2Id ? getFlashscoreNews(p2Id) : null,
+  ]);
+
+  const news = [p1News, p2News].filter(Boolean).join(' | ') || null;
+  if (!news) return null;
+
+  return {
+    home_form: null, away_form: null, h2h: null,
+    home_injuries: null, away_injuries: null,
+    news,
+    context_source: 'flashscore_news',
+    context_updated_at: new Date().toISOString(),
+  };
+}
+
+async function scrapeEvent(event) {
+  const { sport } = event;
+  if (sport === 'football') return scrapeFootball(event);
+  if (['basketball', 'hockey', 'baseball', 'american_football'].includes(sport)) return scrapeUSsport(event);
+  if (['tennis', 'mma', 'cricket', 'rugby'].includes(sport)) return scrapeIndividualSport(event);
+  return null;
+}
+
+// ── MAIN ENDPOINT ─────────────────────────────────────────────────────────────
+
 app.post('/scrape', async (req, res) => {
   try {
     const now = new Date();
@@ -157,7 +359,7 @@ app.post('/scrape', async (req, res) => {
     const to = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000).toISOString();
 
     const events = await sbFetch(
-      `events?statut=eq.NS&context_source=is.null&date_evenement=gte.${from}&date_evenement=lte.${to}&select=id,equipe_domicile,equipe_exterieur,sport,competition&order=date_evenement.asc&limit=60`
+      `events?statut=eq.NS&context_source=is.null&date_evenement=gte.${from}&date_evenement=lte.${to}&select=id,equipe_domicile,equipe_exterieur,sport,competition&order=date_evenement.asc&limit=80`
     );
 
     if (!Array.isArray(events)) {
@@ -169,30 +371,24 @@ app.post('/scrape', async (req, res) => {
 
     for (const e of events) {
       try {
-        const context = await scrapeMatch(e.equipe_domicile, e.equipe_exterieur, e.sport);
+        console.log(`Processing: ${e.equipe_domicile} vs ${e.equipe_exterieur} (${e.sport})`);
+        const context = await scrapeEvent(e);
 
         if (context) {
-          await sbFetch(`events?id=eq.${e.id}`, {
-            method: 'PATCH',
-            body: JSON.stringify(context)
-          });
+          await sbFetch(`events?id=eq.${e.id}`, { method: 'PATCH', body: JSON.stringify(context) });
           enriched++;
-          console.log(`  ✓ ${e.equipe_domicile} vs ${e.equipe_exterieur}`);
+          console.log(`  ✓`);
         } else {
           await sbFetch(`events?id=eq.${e.id}`, {
             method: 'PATCH',
-            body: JSON.stringify({
-              context_source: 'not_found',
-              context_updated_at: new Date().toISOString()
-            })
+            body: JSON.stringify({ context_source: 'not_found', context_updated_at: new Date().toISOString() })
           });
           skipped++;
-          console.log(`  ✗ ${e.equipe_domicile} vs ${e.equipe_exterieur} (not found)`);
+          console.log(`  ✗`);
         }
-
-        await new Promise(r => setTimeout(r, 800));
+        await delay(800);
       } catch(err) {
-        console.error(`Error for ${e.equipe_domicile}:`, err.message);
+        console.error(`Error:`, err.message);
         errors++;
       }
     }
@@ -203,216 +399,36 @@ app.post('/scrape', async (req, res) => {
   }
 });
 
-// Test ESPN athlete injury status in roster
-app.get('/test-espn-roster-injury', async (req, res) => {
-  try {
-    const r = await fetch('https://site.api.espn.com/apis/site/v2/sports/basketball/nba/teams/13/roster', {
-      headers: { 'User-Agent': 'Mozilla/5.0' }
-    });
-    const data = await r.json();
-    const athletes = data.athletes || [];
-    // Check if any athlete has injury info
-    const sample = athletes.slice(0, 3).map(a => ({
-      name: a.displayName || a.fullName,
-      status: a.status,
-      injuries: a.injuries,
-      keys: Object.keys(a)
-    }));
-    res.json({ total: athletes.length, sample });
-  } catch(e) {
-    res.json({ error: e.message });
-  }
-});
+// ── TEST ENDPOINTS ────────────────────────────────────────────────────────────
 
-// Test ESPN injuries sports US
-app.get('/test-espn-injuries-us', async (req, res) => {
-  try {
-    const headers = { 'User-Agent': 'Mozilla/5.0' };
-    const results = {};
-    const endpoints = {
-      nba_lakers: 'https://site.api.espn.com/apis/site/v2/sports/basketball/nba/teams/13/injuries',
-      nhl_bruins: 'https://site.api.espn.com/apis/site/v2/sports/hockey/nhl/teams/1/injuries',
-      mlb_yankees: 'https://site.api.espn.com/apis/site/v2/sports/baseball/mlb/teams/10/injuries',
-      nfl_chiefs: 'https://site.api.espn.com/apis/site/v2/sports/football/nfl/teams/12/injuries',
-      nba_lakers_roster: 'https://site.api.espn.com/apis/site/v2/sports/basketball/nba/teams/13/roster',
-    };
-    for (const [key, url] of Object.entries(endpoints)) {
-      const r = await fetch(url, { headers });
-      const data = await r.json();
-      results[key] = { status: r.status, keys: Object.keys(data), sample: JSON.stringify(data).slice(0, 200) };
-    }
-    res.json(results);
-  } catch(e) {
-    res.json({ error: e.message });
-  }
-});
-
-// Test Transfermarkt injuries
 app.get('/test-transfermarkt', async (req, res) => {
   try {
-    const resp = await fetch('https://www.transfermarkt.fr/ligue-1/verletztespieler/wettbewerb/FR1', {
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        'Accept': 'text/html,application/xhtml+xml',
-        'Accept-Language': 'fr-FR,fr;q=0.9',
-        'Referer': 'https://www.transfermarkt.fr/',
-      }
-    });
-    const text = await resp.text();
-    const hasInjury = text.includes('bless') || text.includes('injury') || text.includes('verletzte');
-    res.json({ status: resp.status, ok: resp.ok, length: text.length, hasInjury, sample: text.slice(0, 300) });
-  } catch(e) {
-    res.json({ error: e.message });
-  }
+    const injuries = await fetchTransfermarktInjuries('GB1');
+    const teams = Object.keys(injuries);
+    const sample = teams.slice(0, 3).map(t => ({ team: t, injured: injuries[t].slice(0, 3) }));
+    res.json({ teams: teams.length, sample });
+  } catch(e) { res.json({ error: e.message }); }
 });
 
-// Test FlashScore squad endpoint
-app.get('/test-flash-squad', async (req, res) => {
+app.get('/test-espn-nba', async (req, res) => {
   try {
-    const headers = {
-      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-      'Accept': '*/*',
-      'Referer': 'https://www.flashscore.com/',
-      'x-fsign': 'SW9D1eZo',
-    };
-    const results = {};
-    const endpoints = [
-      'https://16.flashscore.ninja/16/x/feed/p_1_198_Wtn9Stg0_2_en_1',
-      'https://16.flashscore.ninja/16/x/feed/tetr_Wtn9Stg0_1_1',
-    ];
-    for (const url of endpoints) {
-      const r = await fetch(url, { headers });
-      const text = await r.text();
-      results[url.split('feed/')[1]] = { status: r.status, length: text.length, sample: text.slice(0, 500) };
-    }
-    res.json(results);
-  } catch(e) {
-    res.json({ error: e.message });
-  }
+    const teamId = await findESPNTeam('Los Angeles Lakers', 'basketball', 'nba');
+    const [injuries, form] = await Promise.all([
+      getESPNInjuries(teamId, 'basketball', 'nba'),
+      getESPNForm(teamId, 'basketball', 'nba'),
+    ]);
+    res.json({ teamId, injuries, form });
+  } catch(e) { res.json({ error: e.message }); }
 });
 
-// Test FlashScore GraphQL player injuries
-app.get('/test-flash-player', async (req, res) => {
+app.get('/test-flash-news', async (req, res) => {
   try {
-    const headers = {
-      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-      'Accept': 'application/json',
-      'Referer': 'https://www.flashscore.com/',
-    };
-
-    // Test Gvardiol injury data
-    const url = 'https://16.ds.lsapp.eu/pq_graphql?_hash=fsnulae&projectId=16&entityId=86K1f1fd&entityTypeId=42&layoutTypeId=2&page=1&perPage=20';
-    const r = await fetch(url, { headers });
-    const data = await r.json();
-    res.json({ status: r.status, keys: Object.keys(data), sample: JSON.stringify(data).slice(0, 500) });
-  } catch(e) {
-    res.json({ error: e.message });
-  }
+    const teamId = await searchFlashscoreEntity('Manchester City');
+    const news = teamId ? await getFlashscoreNews(teamId) : null;
+    res.json({ teamId, news });
+  } catch(e) { res.json({ error: e.message }); }
 });
 
-// Test FlashScore GraphQL API
-app.get('/test-flash-graphql', async (req, res) => {
-  try {
-    const headers = {
-      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-      'Accept': 'application/json',
-      'Referer': 'https://www.flashscore.com/',
-      'Origin': 'https://www.flashscore.com',
-    };
-
-    const results = {};
-    // Test different entityTypeId for Manchester City (Wtn9Stg0)
-    const endpoints = [
-      // Squad/players list
-      'https://16.ds.lsapp.eu/pq_graphql?_hash=fsnulae&projectId=16&entityId=Wtn9Stg0&entityTypeId=2&layoutTypeId=2&page=1&perPage=20',
-      // Team injuries
-      'https://16.ds.lsapp.eu/pq_graphql?_hash=fsnulae&projectId=16&entityId=Wtn9Stg0&entityTypeId=3&layoutTypeId=2&page=1&perPage=20',
-      // News feed already works
-      'https://16.flashscore.ninja/16/x/feed/pnf_Wtn9Stg0',
-    ];
-
-    for (const url of endpoints) {
-      try {
-        const r = await fetch(url, { headers });
-        const text = await r.text();
-        results[url.split('?')[0].split('/').pop() + '_' + url.split('entityTypeId=')[1]?.split('&')[0]] = {
-          status: r.status,
-          length: text.length,
-          sample: text.slice(0, 300)
-        };
-      } catch(e) {
-        results[url] = { error: e.message };
-      }
-    }
-    res.json(results);
-  } catch(e) {
-    res.json({ error: e.message });
-  }
-});
-
-// Test FlashScore ninja endpoint
-app.get('/test-flash-ninja', async (req, res) => {
-  try {
-    const headers = {
-      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-      'Accept': '*/*',
-      'Referer': 'https://www.flashscore.com/',
-      'Origin': 'https://www.flashscore.com',
-      'x-fsign': 'SW9D1eZo',
-    };
-
-    const results = {};
-    // Wtn9Stg0 = Manchester City ID on FlashScore
-    const endpoints = [
-      'https://16.flashscore.ninja/16/x/feed/pnf_Wtn9Stg0',
-      'https://16.flashscore.ninja/16/x/feed/tm_Wtn9Stg0',
-      'https://16.flashscore.ninja/16/x/feed/ps_Wtn9Stg0',
-    ];
-
-    for (const url of endpoints) {
-      try {
-        const r = await fetch(url, { headers });
-        const text = await r.text();
-        results[url.split('feed/')[1]] = { status: r.status, length: text.length, sample: text.slice(0, 400) };
-      } catch(e) {
-        results[url.split('feed/')[1]] = { error: e.message };
-      }
-    }
-    res.json(results);
-  } catch(e) {
-    res.json({ error: e.message });
-  }
-});
-
-// Test FlashScore access
-app.get('/test-flash', async (req, res) => {
-  try {
-    const resp = await fetch('https://www.flashscore.com/', {
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-      }
-    });
-    res.json({ status: resp.status, ok: resp.ok });
-  } catch(e) {
-    res.json({ error: e.message });
-  }
-});
-
-// Test ESPN access
-app.get('/test-espn', async (req, res) => {
-  try {
-    const resp = await fetch('https://site.api.espn.com/apis/site/v2/sports/soccer/eng.1/scoreboard', {
-      headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' }
-    });
-    const data = await resp.json();
-    res.json({ status: resp.status, ok: resp.ok, sample: JSON.stringify(data).slice(0, 200) });
-  } catch(e) {
-    res.json({ error: e.message });
-  }
-});
-
-// Health check
 app.get('/health', (req, res) => res.json({ status: 'ok', timestamp: new Date().toISOString() }));
 
 const PORT = process.env.PORT || 3000;
