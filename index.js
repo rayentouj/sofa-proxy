@@ -447,6 +447,32 @@ app.get('/test-flash-news', async (req, res) => {
   } catch(e) { res.json({ error: e.message }); }
 });
 
+app.get('/debug-tm-cells', async (req, res) => {
+  try {
+    const url = 'https://www.transfermarkt.com/premier-league/verletztespieler/wettbewerb/GB1';
+    const resp = await fetch(url, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml',
+        'Referer': 'https://www.google.com/',
+      }
+    });
+    const text = await resp.text();
+    const cheerio = require('cheerio');
+    const $ = cheerio.load(text);
+    const rows = [];
+    $('table.items tbody tr').each((i, row) => {
+      if (i > 3) return;
+      const cells = $(row).find('td');
+      rows.push({
+        cellCount: cells.length,
+        cells: cells.map((_, c) => $(c).text().trim().slice(0, 50)).get()
+      });
+    });
+    res.json({ rowCount: $('table.items tbody tr').length, rows });
+  } catch(e) { res.json({ error: e.message }); }
+});
+
 app.get('/debug-espn-scores', async (req, res) => {
   try {
     const resp = await safeFetch(`https://site.api.espn.com/apis/site/v2/sports/basketball/nba/teams/13/schedule?season=2026`);
