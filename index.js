@@ -429,6 +429,59 @@ app.get('/test-flash-news', async (req, res) => {
   } catch(e) { res.json({ error: e.message }); }
 });
 
+app.get('/debug-espn-form', async (req, res) => {
+  try {
+    const teamId = '13';
+    const resp = await safeFetch(`https://site.api.espn.com/apis/site/v2/sports/basketball/nba/teams/${teamId}/schedule`);
+    const data = await resp.json();
+    const events = data?.events || [];
+    const completed = events.filter(e => e.competitions?.[0]?.status?.type?.completed);
+    const sample = completed.slice(-3).map(e => {
+      const comp = e.competitions?.[0];
+      const competitors = comp?.competitors?.map(c => ({
+        id: c.team?.id, name: c.team?.displayName, score: c.score, homeAway: c.homeAway
+      }));
+      return { name: e.name, completed: comp?.status?.type?.completed, competitors };
+    });
+    res.json({ total: events.length, completed: completed.length, sample });
+  } catch(e) { res.json({ error: e.message }); }
+});
+
+app.get('/debug-transfermarkt', async (req, res) => {
+  try {
+    const url = 'https://www.transfermarkt.com/premier-league/verletztespieler/wettbewerb/GB1';
+    const resp = await fetch(url, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+        'Accept-Language': 'en-US,en;q=0.5',
+        'Referer': 'https://www.google.com/',
+      }
+    });
+    const text = await resp.text();
+    const hasTable = text.includes('table') && text.includes('items');
+    res.json({ status: resp.status, length: text.length, hasTable, sample: text.slice(0, 500) });
+  } catch(e) { res.json({ error: e.message }); }
+});
+
+app.get('/debug-flash-search', async (req, res) => {
+  try {
+    const urls = [
+      `https://s.flashscore.com/search/?q=Manchester+City&l=1&s=1&f=1%3B1&pid=2&sid=1`,
+      `https://www.flashscore.com/search/?q=Manchester+City`,
+    ];
+    const results = {};
+    for (const url of urls) {
+      const r = await fetch(url, {
+        headers: { 'User-Agent': 'Mozilla/5.0', 'Accept': '*/*', 'Referer': 'https://www.flashscore.com/' }
+      });
+      const text = await r.text();
+      results[url.slice(0, 50)] = { status: r.status, length: text.length, sample: text.slice(0, 200) };
+    }
+    res.json(results);
+  } catch(e) { res.json({ error: e.message }); }
+});
+
 app.get('/health', (req, res) => res.json({ status: 'ok', timestamp: new Date().toISOString() }));
 
 const PORT = process.env.PORT || 3000;
