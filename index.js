@@ -135,15 +135,14 @@ async function getFootballInjuries(teamName, competition) {
 
   const injuries = await fetchTransfermarktInjuries(leagueCode);
 
-  // Normalize: remove FC, United, City etc for matching
-  const normalize = (s) => s.toLowerCase()
-    .replace(/\b(fc|afc|cf|sc|ac|bc|if|bk|sk|fk|united|city|town|rovers|wanderers|athletic|albion|county|hotspur|villa)\b/g, '')
-    .replace(/[^a-z0-9]/g, '').trim();
-
-  const normTeam = normalize(teamName);
+  const clean = (s) => s.toLowerCase().replace(/\b(fc|afc|cf|sc|ac)\b/g, '').replace(/\s+/g,' ').trim();
+  const eN = clean(teamName);
   const teamKey = Object.keys(injuries).find(t => {
-    const normT = normalize(t);
-    return normT === normTeam || normT.includes(normTeam) || normTeam.includes(normT);
+    const tN = clean(t);
+    if (tN === eN) return true;
+    if (tN.startsWith(eN + ' ') || tN.endsWith(' ' + eN)) return true;
+    if (eN.startsWith(tN + ' ') || eN.endsWith(' ' + tN)) return true;
+    return false;
   });
   if (!teamKey) return null;
 
@@ -492,6 +491,29 @@ app.get('/debug-espn-nba-schedule', async (req, res) => {
         completed: completed.length,
         sample: completed.slice(-1).map(e => ({ name: e.name, competitors: e.competitions?.[0]?.competitors?.map(c => ({ name: c.team?.displayName, score: c.score })) }))
       };
+    }
+    res.json(results);
+  } catch(e) { res.json({ error: e.message }); }
+});
+
+app.get('/debug-tm-match', async (req, res) => {
+  try {
+    delete injuryCache['GB1'];
+    const injuries = await fetchTransfermarktInjuries('GB1');
+    const teams = Object.keys(injuries);
+    const normalize = (s) => s.toLowerCase()
+      .replace(/\b(fc|afc|cf|sc|ac|bc|if|bk|sk|fk|united|city|town|rovers|wanderers|athletic|albion|county|hotspur|villa)\b/g, '')
+      .replace(/[^a-z0-9]/g, '').trim();
+    
+    const testNames = ['Fulham', 'Brentford', 'Arsenal', 'Liverpool'];
+    const results = {};
+    for (const name of testNames) {
+      const normName = normalize(name);
+      const found = teams.find(t => {
+        const normT = normalize(t);
+        return normT === normName || normT.includes(normName) || normName.includes(normT);
+      });
+      results[name] = { normName, found, injuries: found ? injuries[found]?.length : 0 };
     }
     res.json(results);
   } catch(e) { res.json({ error: e.message }); }
