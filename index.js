@@ -497,6 +497,17 @@ app.get('/debug-espn-nba-schedule', async (req, res) => {
   } catch(e) { res.json({ error: e.message }); }
 });
 
+app.get('/debug-tm-all-teams', async (req, res) => {
+  try {
+    const injuries = await fetchTransfermarktInjuries('GB1');
+    // Clear cache to force re-fetch
+    delete injuryCache['GB1'];
+    const injuries2 = await fetchTransfermarktInjuries('GB1');
+    const teams = Object.keys(injuries2);
+    res.json({ count: teams.length, teams });
+  } catch(e) { res.json({ error: e.message }); }
+});
+
 app.get('/debug-tm-fulham', async (req, res) => {
   try {
     const url = 'https://www.transfermarkt.com/premier-league/verletztespieler/wettbewerb/GB1';
