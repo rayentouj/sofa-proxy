@@ -135,10 +135,16 @@ async function getFootballInjuries(teamName, competition) {
 
   const injuries = await fetchTransfermarktInjuries(leagueCode);
 
-  const teamKey = Object.keys(injuries).find(t =>
-    t.toLowerCase().includes(teamName.toLowerCase().split(' ')[0]) ||
-    teamName.toLowerCase().includes(t.toLowerCase().split(' ')[0])
-  );
+  // Normalize: remove FC, United, City etc for matching
+  const normalize = (s) => s.toLowerCase()
+    .replace(/\b(fc|afc|cf|sc|ac|bc|if|bk|sk|fk|united|city|town|rovers|wanderers|athletic|albion|county|hotspur|villa)\b/g, '')
+    .replace(/[^a-z0-9]/g, '').trim();
+
+  const normTeam = normalize(teamName);
+  const teamKey = Object.keys(injuries).find(t => {
+    const normT = normalize(t);
+    return normT === normTeam || normT.includes(normTeam) || normTeam.includes(normT);
+  });
   if (!teamKey) return null;
 
   const teamInjuries = injuries[teamKey];
