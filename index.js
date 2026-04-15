@@ -461,6 +461,30 @@ app.get('/test-flash-news', async (req, res) => {
   } catch(e) { res.json({ error: e.message }); }
 });
 
+app.get('/debug-espn-nba-schedule', async (req, res) => {
+  try {
+    const results = {};
+    const urls = [
+      'https://site.api.espn.com/apis/site/v2/sports/basketball/nba/teams/13/schedule',
+      'https://site.api.espn.com/apis/site/v2/sports/basketball/nba/teams/13/schedule?season=2025',
+      'https://site.web.api.espn.com/apis/site/v2/sports/basketball/nba/teams/13/schedule?season=2026&seasontype=2',
+      'https://site.api.espn.com/apis/v2/sports/basketball/nba/standings',
+    ];
+    for (const url of urls) {
+      const r = await safeFetch(url);
+      const data = await r?.json();
+      const events = data?.events || [];
+      const completed = events.filter(e => e.competitions?.[0]?.status?.type?.completed);
+      results[url.slice(-40)] = { 
+        total: events.length, 
+        completed: completed.length,
+        sample: completed.slice(-1).map(e => ({ name: e.name, competitors: e.competitions?.[0]?.competitors?.map(c => ({ name: c.team?.displayName, score: c.score })) }))
+      };
+    }
+    res.json(results);
+  } catch(e) { res.json({ error: e.message }); }
+});
+
 app.get('/debug-tm-team', async (req, res) => {
   try {
     const url = 'https://www.transfermarkt.com/premier-league/verletztespieler/wettbewerb/GB1';
