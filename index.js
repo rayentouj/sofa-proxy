@@ -395,24 +395,48 @@ async function scrapeEvent(event) {
 
 // ── MAIN ENDPOINT ─────────────────────────────────────────────────────────────
 
+const MAJOR_COMPETITIONS = [
+  'Premier League','La Liga','Bundesliga','Serie A','Ligue 1',
+  'UEFA Champions League','UEFA Europa League','UEFA Conference League',
+  'FA Cup','EFL Cup','Championship','League One','League Two',
+  'Eredivisie','Primeira Liga','Super Lig','Scottish Premiership',
+  'Saudi Pro League','MLS','Liga MX','Brasileirao',
+];
+const MAJOR_SPORTS = ['basketball','hockey','baseball','american_football','mma'];
+const BATCH_SIZE = 80;
+
 app.post('/scrape', async (req, res) => {
   try {
+    const { offset = 0 } = req.body || {};
     const now = new Date();
     const from = new Date(now.getTime() - 60 * 60 * 1000).toISOString();
     const to = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000).toISOString();
 
+    // Fetch large pool sorted by date
     const events = await sbFetch(
-      `events?statut=eq.NS&context_source=is.null&date_evenement=gte.${from}&date_evenement=lte.${to}&select=id,equipe_domicile,equipe_exterieur,sport,competition&order=date_evenement.asc&limit=80`
+      `events?statut=eq.NS&context_source=is.null&date_evenement=gte.${from}&date_evenement=lte.${to}&select=id,equipe_domicile,equipe_exterieur,sport,competition&order=date_evenement.asc&limit=500`
     );
 
     if (!Array.isArray(events)) {
       return res.status(500).json({ error: 'Failed to fetch events', detail: events });
     }
 
-    console.log(`Found ${events.length} events to enrich`);
+    // Sort: major leagues first, then others (both sorted by date)
+    const major = events.filter(e => MAJOR_COMPETITIONS.includes(e.competition) || MAJOR_SPORTS.includes(e.sport));
+    const others = events.filter(e => !MAJOR_COMPETITIONS.includes(e.competition) && !MAJOR_SPORTS.includes(e.sport));
+    const sorted = [...major, ...others];
+
+    // Apply batch offset
+    const toProcess = sorted.slice(offset, offset + BATCH_SIZE);
+
+    if (toProcess.length === 0) {
+      return res.json({ total: events.length, enriched: 0, skipped: 0, errors: 0, message: 'No more events to process' });
+    }
+
+    console.log(`Batch offset=${offset}: ${toProcess.length} events (pool: ${events.length}, major: ${major.length})`);
     let enriched = 0, errors = 0, skipped = 0;
 
-    for (const e of events) {
+    for (const e of toProcess) {
       try {
         console.log(`Processing: ${e.equipe_domicile} vs ${e.equipe_exterieur} (${e.sport})`);
         const context = await scrapeEvent(e);
