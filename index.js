@@ -447,6 +447,46 @@ app.get('/test-flash-news', async (req, res) => {
   } catch(e) { res.json({ error: e.message }); }
 });
 
+app.get('/debug-espn-scores', async (req, res) => {
+  try {
+    const resp = await safeFetch(`https://site.api.espn.com/apis/site/v2/sports/basketball/nba/teams/13/schedule?season=2026`);
+    const data = await resp.json();
+    const events = data?.events || [];
+    const completed = events.filter(e => e.competitions?.[0]?.status?.type?.completed);
+    const last = completed.slice(-2).map(e => {
+      const comp = e.competitions?.[0];
+      return {
+        name: e.name,
+        status: comp?.status?.type,
+        competitors: comp?.competitors?.map(c => ({
+          id: c.team?.id, name: c.team?.displayName,
+          score: c.score, scoreType: typeof c.score
+        }))
+      };
+    });
+    res.json({ total: events.length, completed: completed.length, last });
+  } catch(e) { res.json({ error: e.message }); }
+});
+
+app.get('/debug-tm-html', async (req, res) => {
+  try {
+    const url = 'https://www.transfermarkt.com/premier-league/verletztespieler/wettbewerb/GB1';
+    const resp = await fetch(url, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml',
+        'Referer': 'https://www.google.com/',
+      }
+    });
+    const text = await resp.text();
+    const cheerio = require('cheerio');
+    const $ = cheerio.load(text);
+    const tables = $('table').map((_, t) => $(t).attr('class')).get();
+    const firstRows = $('table').first().find('tr').slice(0, 3).map((_, r) => $(r).text().trim().slice(0, 100)).get();
+    res.json({ tables, firstRows, htmlSnippet: text.slice(text.indexOf('verletzte'), text.indexOf('verletzte') + 500) });
+  } catch(e) { res.json({ error: e.message }); }
+});
+
 app.get('/debug-espn-form', async (req, res) => {
   try {
     const teamId = '13';
