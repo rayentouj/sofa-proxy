@@ -200,12 +200,16 @@ async function getESPNInjuries(teamId, sport, league) {
 }
 
 async function getESPNForm(teamId, sport, league) {
-  // Try current season first, then previous
-  const years = [2026, 2025, 2024];
-  let completed = [];
+  // Try with seasontype=2 (regular season) first, then fallback
+  const attempts = [
+    `https://site.api.espn.com/apis/site/v2/sports/${sport}/${league}/teams/${teamId}/schedule?season=2026&seasontype=2`,
+    `https://site.web.api.espn.com/apis/site/v2/sports/${sport}/${league}/teams/${teamId}/schedule?season=2026&seasontype=2`,
+    `https://site.api.espn.com/apis/site/v2/sports/${sport}/${league}/teams/${teamId}/schedule?season=2025`,
+  ];
 
-  for (const year of years) {
-    const resp = await safeFetch(`https://site.api.espn.com/apis/site/v2/sports/${sport}/${league}/teams/${teamId}/schedule?season=${year}`);
+  let completed = [];
+  for (const url of attempts) {
+    const resp = await safeFetch(url);
     if (!resp?.ok) continue;
     const data = await resp.json();
     const events = data?.events || [];
@@ -222,8 +226,10 @@ async function getESPNForm(teamId, sport, league) {
     const ourTeam = comp?.competitors?.find(c => c.team?.id === String(teamId));
     const oppTeam = comp?.competitors?.find(c => c.team?.id !== String(teamId));
     if (!ourTeam || !oppTeam) continue;
-    const ourScore = parseInt(ourTeam.score) || 0;
-    const oppScore = parseInt(oppTeam.score) || 0;
+    // Score can be object {value, displayValue} or string
+    const getScore = (s) => typeof s === 'object' ? (s?.value || 0) : (parseInt(s) || 0);
+    const ourScore = getScore(ourTeam.score);
+    const oppScore = getScore(oppTeam.score);
     scored += ourScore;
     conceded += oppScore;
     form += ourScore > oppScore ? 'W' : ourScore < oppScore ? 'L' : 'D';
