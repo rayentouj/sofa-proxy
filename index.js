@@ -491,6 +491,37 @@ app.get('/debug-espn-nba-schedule', async (req, res) => {
   } catch(e) { res.json({ error: e.message }); }
 });
 
+app.get('/debug-tm-fulham', async (req, res) => {
+  try {
+    const url = 'https://www.transfermarkt.com/premier-league/verletztespieler/wettbewerb/GB1';
+    const resp = await fetch(url, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml',
+        'Referer': 'https://www.google.com/',
+      }
+    });
+    const text = await resp.text();
+    const cheerio = require('cheerio');
+    const $ = cheerio.load(text);
+    const rows = [];
+    $('table.items tbody tr').each((i, row) => {
+      const cells = $(row).find('td');
+      const rowText = $(row).text();
+      if (rowText.includes('Fulham') || rowText.includes('Tete') || rowText.includes('Kevin')) {
+        rows.push({
+          i,
+          cellCount: cells.length,
+          cells: cells.map((_, c) => $(c).text().trim().slice(0, 50)).get(),
+          td4_title: cells.eq(4).find('a').first().attr('title'),
+          links: $(row).find('a').map((_, a) => ({ title: $(a).attr('title'), href: $(a).attr('href')?.slice(0,40) })).get()
+        });
+      }
+    });
+    res.json({ found: rows.length, rows });
+  } catch(e) { res.json({ error: e.message }); }
+});
+
 app.get('/debug-tm-team', async (req, res) => {
   try {
     const url = 'https://www.transfermarkt.com/premier-league/verletztespieler/wettbewerb/GB1';
