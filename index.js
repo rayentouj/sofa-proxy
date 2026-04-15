@@ -89,13 +89,11 @@ async function fetchTransfermarktInjuries(leagueCode) {
     const $row = $(row);
 
     // Try to get team from row data or link
-    const teamLink = $row.find('td').eq(4).find('a').first();
-    if (teamLink.length && teamLink.text().trim()) {
-      currentTeam = teamLink.text().trim();
+    // Team is in td[4] as the title attribute of the link
+    const teamTitle = cells.eq(4).find('a').first().attr('title');
+    if (teamTitle && teamTitle.length > 1) {
+      currentTeam = teamTitle;
     }
-    // Also try the team logo td
-    const teamFromImg = $row.find('td a[href*="/team/"]').not('[href*="/player/"]').first().attr('title');
-    if (teamFromImg) currentTeam = teamFromImg;
 
     if (cells.length < 7) return;
 
