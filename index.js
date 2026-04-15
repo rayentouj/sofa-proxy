@@ -463,6 +463,36 @@ app.get('/test-flash-news', async (req, res) => {
   } catch(e) { res.json({ error: e.message }); }
 });
 
+app.get('/debug-tm-team', async (req, res) => {
+  try {
+    const url = 'https://www.transfermarkt.com/premier-league/verletztespieler/wettbewerb/GB1';
+    const resp = await fetch(url, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml',
+        'Referer': 'https://www.google.com/',
+      }
+    });
+    const text = await resp.text();
+    const cheerio = require('cheerio');
+    const $ = cheerio.load(text);
+    // Show first 5 rows with full HTML
+    const rows = [];
+    $('table.items tbody tr').each((i, row) => {
+      if (i > 5) return;
+      const cells = $(row).find('td');
+      rows.push({
+        i,
+        cellCount: cells.length,
+        td4_html: cells.eq(4).html()?.slice(0, 200),
+        td4_text: cells.eq(4).text().trim().slice(0, 100),
+        links: $(row).find('a').map((_, a) => ({ href: $(a).attr('href')?.slice(0, 50), title: $(a).attr('title'), text: $(a).text().trim().slice(0, 30) })).get()
+      });
+    });
+    res.json({ rows });
+  } catch(e) { res.json({ error: e.message }); }
+});
+
 app.get('/debug-tm-cells', async (req, res) => {
   try {
     const url = 'https://www.transfermarkt.com/premier-league/verletztespieler/wettbewerb/GB1';
