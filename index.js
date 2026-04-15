@@ -80,26 +80,42 @@ async function fetchTransfermarktInjuries(leagueCode) {
   const $ = cheerio.load(html);
   const injuries = {};
 
-  $('table.items > tbody > tr, .items > tbody > tr').each((_, row) => {
+  // Structure: rows with 8 cells = player row
+  // cells[2]=name, cells[3]=position, cells[5]=injury, cells[7]=value
+  // Team is stored in a data attribute on the row or nearby
+  let currentTeam = null;
+  $('table.items tbody tr').each((_, row) => {
     const cells = $(row).find('td');
-    if (cells.length < 5) return;
+    const $row = $(row);
 
-    const playerName = $(cells[1]).find('a').first().text().trim();
-    const position = $(cells[2]).text().trim();
-    const teamName = $(cells[3]).find('a').first().text().trim();
-    const injuryType = $(cells[4]).text().trim();
-    const returnDate = $(cells[5]).text().trim();
-    const valueText = $(cells[6]).text().trim();
+    // Try to get team from row data or link
+    const teamLink = $row.find('td').eq(4).find('a').first();
+    if (teamLink.length && teamLink.text().trim()) {
+      currentTeam = teamLink.text().trim();
+    }
+    // Also try the team logo td
+    const teamFromImg = $row.find('td a[href*="/team/"]').not('[href*="/player/"]').first().attr('title');
+    if (teamFromImg) currentTeam = teamFromImg;
 
-    if (!playerName || !teamName) return;
+    if (cells.length < 7) return;
+
+    const playerName = cells.eq(2).text().trim();
+    const position = cells.eq(3).text().trim();
+    const injuryType = cells.eq(5).text().trim();
+    const returnDate = cells.eq(6).text().trim();
+    const valueText = cells.eq(7).text().trim();
+
+    if (!playerName || playerName.length < 2) return;
 
     let value = 0;
     const vm = valueText.replace(/[€$£]/g, '').trim();
     if (vm.includes('m')) value = parseFloat(vm) || 0;
     else if (vm.includes('k')) value = (parseFloat(vm) || 0) / 1000;
 
-    if (!injuries[teamName]) injuries[teamName] = [];
-    injuries[teamName].push({ name: playerName, position, injury: injuryType, returnDate, value });
+    // Use currentTeam or extract from row
+    const team = currentTeam || 'Unknown';
+    if (!injuries[team]) injuries[team] = [];
+    injuries[team].push({ name: playerName, position, injury: injuryType, returnDate, value });
   });
 
   injuryCache[leagueCode] = injuries;
