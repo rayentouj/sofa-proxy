@@ -520,6 +520,27 @@ app.get('/debug-espn-nba-schedule', async (req, res) => {
   } catch(e) { res.json({ error: e.message }); }
 });
 
+app.get('/debug-injuries-fulham', async (req, res) => {
+  try {
+    delete injuryCache['GB1'];
+    const injuries = await fetchTransfermarktInjuries('GB1');
+    const clean = (s) => s.toLowerCase().replace(/\b(fc|afc|cf|sc|ac)\b/g, '').replace(/\s+/g,' ').trim();
+    const eN = clean('Fulham');
+    const teamKey = Object.keys(injuries).find(t => {
+      const tN = clean(t);
+      if (tN === eN) return true;
+      if (tN.startsWith(eN + ' ') || tN.endsWith(' ' + eN)) return true;
+      if (eN.startsWith(tN + ' ') || eN.endsWith(' ' + tN)) return true;
+      return false;
+    });
+    if (!teamKey) return res.json({ error: 'Team not found', teams: Object.keys(injuries) });
+    const teamInjuries = injuries[teamKey];
+    // Show impact for each player
+    const withImpact = teamInjuries.map(p => ({ ...p, impact: getInjuryImpact(p, teamInjuries) }));
+    res.json({ teamKey, count: teamInjuries.length, players: withImpact });
+  } catch(e) { res.json({ error: e.message }); }
+});
+
 app.get('/debug-tm-match', async (req, res) => {
   try {
     delete injuryCache['GB1'];
