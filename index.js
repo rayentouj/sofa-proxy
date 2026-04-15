@@ -80,7 +80,7 @@ async function fetchTransfermarktInjuries(leagueCode) {
   const $ = cheerio.load(html);
   const injuries = {};
 
-  $('table.items tbody tr').each((_, row) => {
+  $('table.items > tbody > tr, .items > tbody > tr').each((_, row) => {
     const cells = $(row).find('td');
     if (cells.length < 5) return;
 
@@ -186,16 +186,24 @@ async function getESPNInjuries(teamId, sport, league) {
 }
 
 async function getESPNForm(teamId, sport, league) {
-  const resp = await safeFetch(`https://site.api.espn.com/apis/site/v2/sports/${sport}/${league}/teams/${teamId}/schedule`);
-  if (!resp?.ok) return null;
-  const data = await resp.json();
-  const events = data?.events || [];
+  // Try current season first, then previous
+  const years = [2026, 2025, 2024];
+  let completed = [];
 
-  const completed = events.filter(e => e.competitions?.[0]?.status?.type?.completed).slice(-5);
+  for (const year of years) {
+    const resp = await safeFetch(`https://site.api.espn.com/apis/site/v2/sports/${sport}/${league}/teams/${teamId}/schedule?season=${year}`);
+    if (!resp?.ok) continue;
+    const data = await resp.json();
+    const events = data?.events || [];
+    completed = events.filter(e => e.competitions?.[0]?.status?.type?.completed);
+    if (completed.length > 0) break;
+  }
+
   if (!completed.length) return null;
+  const last5 = completed.slice(-5);
 
   let form = '', scored = 0, conceded = 0;
-  for (const event of completed) {
+  for (const event of last5) {
     const comp = event.competitions?.[0];
     const ourTeam = comp?.competitors?.find(c => c.team?.id === String(teamId));
     const oppTeam = comp?.competitors?.find(c => c.team?.id !== String(teamId));
@@ -225,7 +233,17 @@ async function searchFlashscoreEntity(name) {
   );
   if (!resp?.ok) return null;
   const text = await resp.text();
-  const match = text.match(/~([A-Za-z0-9]{8})~/);
+  // Parse JSONP: cjs.search.jsonpCallback({...})
+  try {
+    const jsonMatch = text.match(/jsonpCallback\((.+)\)$/s);
+    if (jsonMatch) {
+      const data = JSON.parse(jsonMatch[1]);
+      const result = data?.results?.[0];
+      return result?.id || null;
+    }
+  } catch(e) {}
+  // Fallback: regex
+  const match = text.match(/"id":"([A-Za-z0-9]{8})"/);
   return match ? match[1] : null;
 }
 
