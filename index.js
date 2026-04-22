@@ -247,12 +247,21 @@ async function findESPNSoccerTeam(teamName, slug) {
 }
 
 async function getESPNSoccerForm(teamId, slug) {
-  const resp = await safeFetch(`https://site.api.espn.com/apis/site/v2/sports/soccer/${slug}/teams/${teamId}/schedule`);
+  // Try current season first (ESPN uses year the season started)
+  const now = new Date();
+  const currentYear = now.getMonth() >= 6 ? now.getFullYear() : now.getFullYear() - 1;
+  const resp = await safeFetch(`https://site.api.espn.com/apis/site/v2/sports/soccer/${slug}/teams/${teamId}/schedule?season=${currentYear}`);
   if (!resp?.ok) return null;
   const data = await resp.json();
   const events = data?.events || [];
-  const completed = events.filter(e => e.competitions?.[0]?.status?.type?.completed);
+  // Filter completed matches before today
+  const completed = events.filter(e => {
+    if (!e.competitions?.[0]?.status?.type?.completed) return false;
+    return new Date(e.date) <= now;
+  });
   if (!completed.length) return null;
+  // Sort by date and take last 5
+  completed.sort((a, b) => new Date(a.date) - new Date(b.date));
   const last5 = completed.slice(-5);
 
   let form = '', scored = 0, conceded = 0;
