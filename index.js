@@ -199,6 +199,134 @@ const ESPN_SPORT_CONFIG = {
   american_football: { sport: 'football', league: 'nfl' },
 };
 
+// Map competition name → ESPN soccer slug
+const ESPN_SOCCER_SLUGS = {
+  'EPL': 'eng.1', 'Premier League': 'eng.1', 'English Premier League': 'eng.1',
+  'Championship': 'eng.2', 'League One': 'eng.3', 'League 1': 'eng.3',
+  'League Two': 'eng.4', 'League 2': 'eng.4', 'FA Cup': 'eng.fa',
+  'EFL Cup': 'eng.league_cup',
+  'La Liga': 'esp.1', 'La Liga - Spain': 'esp.1',
+  'Bundesliga': 'ger.1', 'Bundesliga - Germany': 'ger.1',
+  'Bundesliga 2 - Germany': 'ger.2',
+  'Serie A': 'ita.1', 'Italian Serie A': 'ita.1',
+  'Ligue 1': 'fra.1', 'Ligue 1 - France': 'fra.1',
+  'Ligue 2': 'fra.2', 'Ligue 2 - France': 'fra.2',
+  'Dutch Eredivisie': 'ned.1', 'Eredivisie': 'ned.1',
+  'Primeira Liga': 'por.1',
+  'Super Lig': 'tur.1', 'Turkish Super Lig': 'tur.1',
+  'Scottish Premiership': 'sco.1',
+  'MLS': 'usa.1',
+  'Liga MX': 'mex.1',
+  'Brazil Série A': 'bra.1', 'Brasileirao': 'bra.1',
+  'UEFA Champions League': 'uefa.champions', 'Champions League': 'uefa.champions',
+  'UEFA Europa League': 'uefa.europa', 'Europa League': 'uefa.europa',
+  'UEFA Conference League': 'uefa.europa.conf', 'Conference League': 'uefa.europa.conf',
+  'Copa del Rey': 'esp.copa_del_rey',
+  'DFB-Pokal': 'ger.dfb_pokal',
+  'Coppa Italia': 'ita.coppa_italia',
+  'Coupe de France': 'fra.coupe_de_france',
+};
+
+// Cache for ESPN soccer team IDs per league
+const espnSoccerTeamCache = {};
+
+async function findESPNSoccerTeam(teamName, slug) {
+  if (!espnSoccerTeamCache[slug]) {
+    const resp = await safeFetch(`https://site.api.espn.com/apis/site/v2/sports/soccer/${slug}/teams?limit=100`);
+    if (!resp?.ok) return null;
+    const data = await resp.json();
+    espnSoccerTeamCache[slug] = data?.sports?.[0]?.leagues?.[0]?.teams || [];
+  }
+  const teams = espnSoccerTeamCache[slug];
+  const normalized = teamName.toLowerCase().replace(/\bfc\b|\bafc\b|\bsc\b/g, '').trim();
+  const found = teams.find(t => {
+    const dn = (t.team?.displayName || '').toLowerCase().replace(/\bfc\b|\bafc\b|\bsc\b/g, '').trim();
+    return dn === normalized || dn.includes(normalized) || normalized.includes(dn);
+  });
+  return found?.team?.id || null;
+}
+
+async function getESPNSoccerForm(teamId, slug) {
+  const resp = await safeFetch(`https://site.api.espn.com/apis/site/v2/sports/soccer/${slug}/teams/${teamId}/schedule`);
+  if (!resp?.ok) return null;
+  const data = await resp.json();
+  const events = data?.events || [];
+  const completed = events.filter(e => e.competitions?.[0]?.status?.type?.completed);
+  if (!completed.length) return null;
+  const last5 = completed.slice(-5);
+
+  let form = '', scored = 0, conceded = 0;
+  for (const event of last5) {
+    const comp = event.competitions?.[0];
+    const ourTeam = comp?.competitors?.find(c => c.team?.id === String(teamId));
+    const oppTeam = comp?.competitors?.find(c => c.team?.id !== String(teamId));
+    if (!ourTeam || !oppTeam) continue;
+    const getScore = (s) => typeof s === 'object' ? (s?.value || 0) : (parseInt(s) || 0);
+    const ourScore = getScore(ourTeam.score);
+    const oppScore = getScore(oppTeam.score);
+    scored += ourScore;
+    conceded += oppScore;
+    form += ourScore > oppScore ? 'W' : ourScore < oppScore ? 'L' : 'D';
+  }
+  return form ? `${form} (${scored} scored, ${conceded} conceded)` : null;
+}
+
+async function getESPNSoccerStandings(teamName, slug) {
+  const resp = await safeFetch(`https://site.api.espn.com/apis/v2/sports/soccer/${slug}/standings`);
+  if (!resp?.ok) return null;
+  const data = await resp.json();
+
+  // Navigate through standings structure
+  const groups = data?.children?.[0]?.standings?.entries || data?.standings?.entries || [];
+  const normalized = teamName.toLowerCase().replace(/\bfc\b|\bafc\b/g, '').trim();
+
+  const entry = groups.find(e => {
+    const tn = (e.team?.displayName || '').toLowerCase().replace(/\bfc\b|\bafc\b/g, '').trim();
+    return tn === normalized || tn.includes(normalized) || normalized.includes(tn);
+  });
+
+  if (!entry) return null;
+
+  // Extract stats
+  const stats = {};
+  (entry.stats || []).forEach(s => { stats[s.name] = s.value; });
+
+  const pos = entry.note?.rank || stats.rank || null;
+  const pts = stats.points || stats.pts || null;
+  const played = stats.gamesPlayed || stats.played || null;
+  const gd = stats.pointDifferential || stats.goalDifference || null;
+
+  if (!pos) return null;
+  return `${pos}e (${pts} pts, ${played} matchs joués, GD: ${gd > 0 ? '+' : ''}${gd})`;
+}
+
+async function getESPNSoccerH2H(homeId, awayId, slug) {
+  // Get last matches of home team and filter for matches against away team
+  const resp = await safeFetch(`https://site.api.espn.com/apis/site/v2/sports/soccer/${slug}/teams/${homeId}/schedule`);
+  if (!resp?.ok) return null;
+  const data = await resp.json();
+  const events = data?.events || [];
+
+  const h2h = events.filter(e => {
+    const comp = e.competitions?.[0];
+    const hasAway = comp?.competitors?.some(c => c.team?.id === String(awayId));
+    return hasAway && comp?.status?.type?.completed;
+  }).slice(-5);
+
+  if (!h2h.length) return null;
+
+  return h2h.map(e => {
+    const comp = e.competitions?.[0];
+    const home = comp?.competitors?.find(c => c.homeAway === 'home');
+    const away = comp?.competitors?.find(c => c.homeAway === 'away');
+    const getScore = (s) => typeof s === 'object' ? (s?.value || 0) : (parseInt(s) || 0);
+    const hs = getScore(home?.score);
+    const as = getScore(away?.score);
+    const date = e.date ? new Date(e.date).toLocaleDateString('fr-FR') : '';
+    return `${home?.team?.shortDisplayName || home?.team?.displayName} ${hs}-${as} ${away?.team?.shortDisplayName || away?.team?.displayName} (${date})`;
+  }).join(' | ');
+}
+
 async function findESPNTeam(teamName, sport, league) {
   const resp = await safeFetch(`https://site.api.espn.com/apis/site/v2/sports/${sport}/${league}/teams?limit=100`);
   if (!resp?.ok) return null;
@@ -326,33 +454,69 @@ async function getFlashscoreNews(entityId) {
 async function scrapeFootball(event) {
   const { equipe_domicile: home, equipe_exterieur: away, competition } = event;
 
+  // Get ESPN soccer slug for this competition
+  const espnSlug = ESPN_SOCCER_SLUGS[competition] || null;
+
+  // Run all sources in parallel
   const [homeInj, awayInj] = await Promise.all([
     getFootballInjuries(home, competition),
     getFootballInjuries(away, competition),
   ]);
 
-  await delay(500);
-  const [homeId, awayId] = await Promise.all([
+  // ESPN form + standings + H2H
+  let homeForm = null, awayForm = null, h2h = null, homeStandings = null, awayStandings = null;
+  if (espnSlug) {
+    const [homeEspnId, awayEspnId] = await Promise.all([
+      findESPNSoccerTeam(home, espnSlug),
+      findESPNSoccerTeam(away, espnSlug),
+    ]);
+
+    if (homeEspnId && awayEspnId) {
+      const [hForm, aForm, hStand, aStand, h2hData] = await Promise.all([
+        getESPNSoccerForm(homeEspnId, espnSlug),
+        getESPNSoccerForm(awayEspnId, espnSlug),
+        getESPNSoccerStandings(home, espnSlug),
+        getESPNSoccerStandings(away, espnSlug),
+        getESPNSoccerH2H(homeEspnId, awayEspnId, espnSlug),
+      ]);
+      homeForm = hForm;
+      awayForm = aForm;
+      homeStandings = hStand;
+      awayStandings = aStand;
+      h2h = h2hData;
+    }
+  }
+
+  // FlashScore news
+  await delay(300);
+  const [homeFlashId, awayFlashId] = await Promise.all([
     searchFlashscoreEntity(home),
     searchFlashscoreEntity(away),
   ]);
 
   let homeNews = null, awayNews = null;
-  if (homeId) { await delay(300); homeNews = await getFlashscoreNews(homeId); }
-  if (awayId) { await delay(300); awayNews = await getFlashscoreNews(awayId); }
-
+  if (homeFlashId) { await delay(200); homeNews = await getFlashscoreNews(homeFlashId); }
+  if (awayFlashId) { await delay(200); awayNews = await getFlashscoreNews(awayFlashId); }
   const news = [homeNews, awayNews].filter(Boolean).join(' | ') || null;
-  const hasData = homeInj || awayInj || news;
+
+  const hasData = homeInj || awayInj || news || homeForm || h2h;
   if (!hasData) return null;
 
+  // Build standings string for context
+  const standingsContext = [
+    homeStandings ? `${home}: ${homeStandings}` : null,
+    awayStandings ? `${away}: ${awayStandings}` : null,
+  ].filter(Boolean).join(' | ') || null;
+
   return {
-    home_form: null,
-    away_form: null,
-    h2h: null,
+    home_form: homeForm,
+    away_form: awayForm,
+    h2h: h2h,
     home_injuries: homeInj,
     away_injuries: awayInj,
-    news,
-    context_source: 'transfermarkt+flashscore',
+    news: news,
+    standings: standingsContext,
+    context_source: 'transfermarkt+espn+flashscore',
     context_updated_at: new Date().toISOString(),
   };
 }
@@ -763,6 +927,24 @@ app.get('/debug-transfermarkt', async (req, res) => {
     const text = await resp.text();
     const hasTable = text.includes('table') && text.includes('items');
     res.json({ status: resp.status, length: text.length, hasTable, sample: text.slice(0, 500) });
+  } catch(e) { res.json({ error: e.message }); }
+});
+
+app.get('/test-espn-soccer', async (req, res) => {
+  try {
+    const slug = 'eng.1';
+    const [homeId, awayId] = await Promise.all([
+      findESPNSoccerTeam('Brentford', slug),
+      findESPNSoccerTeam('Fulham', slug),
+    ]);
+    const [homeForm, awayForm, homeStand, awayStand, h2h] = await Promise.all([
+      getESPNSoccerForm(homeId, slug),
+      getESPNSoccerForm(awayId, slug),
+      getESPNSoccerStandings('Brentford', slug),
+      getESPNSoccerStandings('Fulham', slug),
+      getESPNSoccerH2H(homeId, awayId, slug),
+    ]);
+    res.json({ homeId, awayId, homeForm, awayForm, homeStand, awayStand, h2h });
   } catch(e) { res.json({ error: e.message }); }
 });
 
