@@ -766,6 +766,28 @@ app.get('/debug-transfermarkt', async (req, res) => {
   } catch(e) { res.json({ error: e.message }); }
 });
 
+app.get('/test-espn-football', async (req, res) => {
+  try {
+    const results = {};
+    const endpoints = {
+      // EPL standings
+      epl_standings: 'https://site.api.espn.com/apis/v2/sports/soccer/eng.1/standings',
+      // Brentford last matches
+      brentford_form: 'https://site.api.espn.com/apis/site/v2/sports/soccer/eng.1/teams/396/schedule',
+      // Search team
+      brentford_info: 'https://site.api.espn.com/apis/site/v2/sports/soccer/eng.1/teams/396',
+      // H2H / scoreboard
+      epl_scores: 'https://site.api.espn.com/apis/site/v2/sports/soccer/eng.1/scoreboard',
+    };
+    for (const [key, url] of Object.entries(endpoints)) {
+      const r = await safeFetch(url);
+      const data = await r?.json();
+      results[key] = { status: r?.status, keys: Object.keys(data||{}), sample: JSON.stringify(data).slice(0, 200) };
+    }
+    res.json(results);
+  } catch(e) { res.json({ error: e.message }); }
+});
+
 app.get('/test-sofascore', async (req, res) => {
   try {
     const headers = {
