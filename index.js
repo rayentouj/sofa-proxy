@@ -256,6 +256,8 @@ async function getESPNSoccerForm(teamId, slug) {
   const last5 = completed.slice(-5);
 
   let form = '', scored = 0, conceded = 0;
+  const details = [];
+
   for (const event of last5) {
     const comp = event.competitions?.[0];
     const ourTeam = comp?.competitors?.find(c => c.team?.id === String(teamId));
@@ -266,9 +268,18 @@ async function getESPNSoccerForm(teamId, slug) {
     const oppScore = getScore(oppTeam.score);
     scored += ourScore;
     conceded += oppScore;
-    form += ourScore > oppScore ? 'W' : ourScore < oppScore ? 'L' : 'D';
+    const result = ourScore > oppScore ? 'W' : ourScore < oppScore ? 'L' : 'D';
+    form += result;
+    const date = event.date ? new Date(event.date).toLocaleDateString('fr-FR', {day:'2-digit', month:'2-digit'}) : '';
+    const isHome = ourTeam.homeAway === 'home';
+    const oppName = oppTeam.team?.shortDisplayName || oppTeam.team?.displayName || '';
+    details.push(`${result} ${ourScore}-${oppScore} vs ${oppName} (${isHome ? 'D' : 'E'}, ${date})`);
   }
-  return form ? `${form} (${scored} scored, ${conceded} conceded)` : null;
+
+  return {
+    form: form ? `${form} (${scored} scored, ${conceded} conceded)` : null,
+    detail: details.join(' | ') || null,
+  };
 }
 
 async function getESPNSoccerStandings(teamName, slug) {
@@ -464,7 +475,7 @@ async function scrapeFootball(event) {
   ]);
 
   // ESPN form + standings + H2H
-  let homeForm = null, awayForm = null, h2h = null, homeStandings = null, awayStandings = null;
+  let homeForm = null, awayForm = null, homeFormDetail = null, awayFormDetail = null, h2h = null, homeStandings = null, awayStandings = null;
   if (espnSlug) {
     const [homeEspnId, awayEspnId] = await Promise.all([
       findESPNSoccerTeam(home, espnSlug),
@@ -472,15 +483,17 @@ async function scrapeFootball(event) {
     ]);
 
     if (homeEspnId && awayEspnId) {
-      const [hForm, aForm, hStand, aStand, h2hData] = await Promise.all([
+      const [hFormData, aFormData, hStand, aStand, h2hData] = await Promise.all([
         getESPNSoccerForm(homeEspnId, espnSlug),
         getESPNSoccerForm(awayEspnId, espnSlug),
         getESPNSoccerStandings(home, espnSlug),
         getESPNSoccerStandings(away, espnSlug),
         getESPNSoccerH2H(homeEspnId, awayEspnId, espnSlug),
       ]);
-      homeForm = hForm;
-      awayForm = aForm;
+      homeForm = hFormData?.form || null;
+      awayForm = aFormData?.form || null;
+      homeFormDetail = hFormData?.detail || null;
+      awayFormDetail = aFormData?.detail || null;
       homeStandings = hStand;
       awayStandings = aStand;
       h2h = h2hData;
@@ -511,6 +524,8 @@ async function scrapeFootball(event) {
   return {
     home_form: homeForm,
     away_form: awayForm,
+    home_form_detail: homeFormDetail,
+    away_form_detail: awayFormDetail,
     h2h: h2h,
     home_injuries: homeInj,
     away_injuries: awayInj,
