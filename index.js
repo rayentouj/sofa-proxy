@@ -766,6 +766,28 @@ app.get('/debug-transfermarkt', async (req, res) => {
   } catch(e) { res.json({ error: e.message }); }
 });
 
+app.get('/test-espn-soccer-search', async (req, res) => {
+  try {
+    const results = {};
+    const leagues = [
+      { key: 'epl', slug: 'eng.1' },
+      { key: 'ligue1', slug: 'fra.1' },
+      { key: 'laliga', slug: 'esp.1' },
+      { key: 'bundesliga', slug: 'ger.1' },
+      { key: 'seriea', slug: 'ita.1' },
+      { key: 'ucl', slug: 'uefa.champions' },
+    ];
+    for (const { key, slug } of leagues) {
+      const r = await safeFetch(`https://site.api.espn.com/apis/site/v2/sports/soccer/${slug}/teams?limit=100`);
+      const data = await r?.json();
+      const teams = data?.sports?.[0]?.leagues?.[0]?.teams || [];
+      const brentford = teams.find(t => t.team?.displayName?.toLowerCase().includes('brentford'));
+      results[key] = { total: teams.length, brentford: brentford?.team?.id, sample: teams.slice(0,3).map(t => ({ id: t.team?.id, name: t.team?.displayName })) };
+    }
+    res.json(results);
+  } catch(e) { res.json({ error: e.message }); }
+});
+
 app.get('/test-espn-football', async (req, res) => {
   try {
     const results = {};
