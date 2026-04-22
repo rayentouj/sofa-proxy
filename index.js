@@ -766,6 +766,56 @@ app.get('/debug-transfermarkt', async (req, res) => {
   } catch(e) { res.json({ error: e.message }); }
 });
 
+app.get('/test-sofascore', async (req, res) => {
+  try {
+    const headers = {
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+      'Accept': 'application/json',
+      'Referer': 'https://www.sofascore.com/',
+    };
+    const results = {};
+    const endpoints = [
+      // Search Brentford
+      'https://api.sofascore.com/api/v1/search/multi/?q=Brentford&page=0',
+      // Last matches Brentford (id=43')
+      'https://api.sofascore.com/api/v1/team/43/events/last/0',
+      // Standings EPL
+      'https://api.sofascore.com/api/v1/unique-tournament/17/season/61627/standings/total',
+    ];
+    for (const url of endpoints) {
+      const r = await fetch(url, { headers });
+      const text = await r.text();
+      results[url.split('/api/v1/')[1].slice(0,40)] = { 
+        status: r.status, 
+        length: text.length, 
+        sample: text.slice(0, 300) 
+      };
+    }
+    res.json(results);
+  } catch(e) { res.json({ error: e.message }); }
+});
+
+app.get('/debug-flash-upcoming', async (req, res) => {
+  try {
+    // Try to get upcoming matches for Brentford via their page
+    const urls = [
+      'https://www.flashscore.com/team/brentford/xYe7DwID/fixtures/',
+      'https://16.flashscore.ninja/16/x/feed/d_sr_2_xYe7DwID',
+      'https://16.flashscore.ninja/16/x/feed/d_su_2_xYe7DwID',
+    ];
+    const results = {};
+    for (const url of urls) {
+      const r = await fetch(url, { headers: { ...flashHeaders, 'Accept': 'text/html,*/*' } });
+      const text = await r.text();
+      // Look for match IDs (8 char alphanumeric)
+      const matchIds = text.match(/mid=([A-Za-z0-9]{8})/g) || [];
+      const feedIds = text.match(/~([A-Za-z0-9]{8})~/g)?.slice(0,5) || [];
+      results[url.split('/').pop()] = { status: r.status, length: text.length, matchIds: matchIds.slice(0,5), feedIds, sample: text.slice(0, 300) };
+    }
+    res.json(results);
+  } catch(e) { res.json({ error: e.message }); }
+});
+
 app.get('/debug-flash-match-id', async (req, res) => {
   try {
     // Brentford team ID from search
