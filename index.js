@@ -766,6 +766,25 @@ app.get('/debug-transfermarkt', async (req, res) => {
   } catch(e) { res.json({ error: e.message }); }
 });
 
+app.get('/debug-flash-match-id', async (req, res) => {
+  try {
+    // Brentford team ID from search
+    const teamId = 'xYe7DwID';
+    const results = {};
+    const endpoints = [
+      `https://16.flashscore.ninja/16/x/feed/tr_1_${teamId}_1_en_1`,
+      `https://16.flashscore.ninja/16/x/feed/tr_1_${teamId}_2_en_1`,
+      `https://16.flashscore.ninja/16/x/feed/tf_1_${teamId}_1_en_1`,
+    ];
+    for (const url of endpoints) {
+      const r = await fetch(url, { headers: flashHeaders });
+      const text = await r.text();
+      results[url.split('feed/')[1]] = { status: r.status, length: text.length, sample: text.slice(0, 400) };
+    }
+    res.json(results);
+  } catch(e) { res.json({ error: e.message }); }
+});
+
 app.get('/debug-flash-search', async (req, res) => {
   try {
     const urls = [
