@@ -312,21 +312,33 @@ async function getESPNSoccerStandings(teamName, slug) {
 }
 
 async function getESPNSoccerH2H(homeId, awayId, slug) {
-  // Get last matches of home team and filter for matches against away team
-  const resp = await safeFetch(`https://site.api.espn.com/apis/site/v2/sports/soccer/${slug}/teams/${homeId}/schedule`);
-  if (!resp?.ok) return null;
-  const data = await resp.json();
-  const events = data?.events || [];
+  // Search multiple seasons to get up to 5 H2H matches
+  const years = [2026, 2025, 2024, 2023];
+  const allH2H = [];
 
-  const h2h = events.filter(e => {
-    const comp = e.competitions?.[0];
-    const hasAway = comp?.competitors?.some(c => c.team?.id === String(awayId));
-    return hasAway && comp?.status?.type?.completed;
-  }).slice(-5);
+  for (const year of years) {
+    if (allH2H.length >= 5) break;
+    const resp = await safeFetch(`https://site.api.espn.com/apis/site/v2/sports/soccer/${slug}/teams/${homeId}/schedule?season=${year}`);
+    if (!resp?.ok) continue;
+    const data = await resp.json();
+    const events = data?.events || [];
 
-  if (!h2h.length) return null;
+    const h2h = events.filter(e => {
+      const comp = e.competitions?.[0];
+      const hasAway = comp?.competitors?.some(c => c.team?.id === String(awayId));
+      return hasAway && comp?.status?.type?.completed;
+    });
+    allH2H.push(...h2h);
+    await delay(200);
+  }
 
-  return h2h.map(e => {
+  if (!allH2H.length) return null;
+
+  // Sort by date descending and take last 5
+  allH2H.sort((a, b) => new Date(b.date) - new Date(a.date));
+  const last5 = allH2H.slice(0, 5);
+
+  return last5.map(e => {
     const comp = e.competitions?.[0];
     const home = comp?.competitors?.find(c => c.homeAway === 'home');
     const away = comp?.competitors?.find(c => c.homeAway === 'away');
@@ -500,19 +512,7 @@ async function scrapeFootball(event) {
     }
   }
 
-  // FlashScore news
-  await delay(300);
-  const [homeFlashId, awayFlashId] = await Promise.all([
-    searchFlashscoreEntity(home),
-    searchFlashscoreEntity(away),
-  ]);
-
-  let homeNews = null, awayNews = null;
-  if (homeFlashId) { await delay(200); homeNews = await getFlashscoreNews(homeFlashId); }
-  if (awayFlashId) { await delay(200); awayNews = await getFlashscoreNews(awayFlashId); }
-  const news = [homeNews, awayNews].filter(Boolean).join(' | ') || null;
-
-  const hasData = homeInj || awayInj || news || homeForm || h2h;
+  const hasData = homeInj || awayInj || homeForm || h2h;
   if (!hasData) return null;
 
   // Build standings string for context
@@ -529,9 +529,9 @@ async function scrapeFootball(event) {
     h2h: h2h,
     home_injuries: homeInj,
     away_injuries: awayInj,
-    news: news,
+    news: null,
     standings: standingsContext,
-    context_source: 'transfermarkt+espn+flashscore',
+    context_source: 'transfermarkt+espn',
     context_updated_at: new Date().toISOString(),
   };
 }
