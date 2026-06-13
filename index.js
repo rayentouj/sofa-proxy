@@ -620,6 +620,8 @@ const MAJOR_COMPETITIONS = [
   'FA Cup','EFL Cup','Championship','League One','League Two',
   'Eredivisie','Primeira Liga','Super Lig','Scottish Premiership',
   'Saudi Pro League','MLS','Liga MX','Brasileirao',
+  'FIFA World Cup','Brazil Série A','Brazil Série B',
+  'EPL','La Liga - Spain','Bundesliga - Germany','Ligue 1 - France','Dutch Eredivisie',
 ];
 const MAJOR_SPORTS = ['basketball','hockey','baseball','american_football','mma'];
 const BATCH_SIZE = 80;
