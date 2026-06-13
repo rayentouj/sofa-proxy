@@ -218,6 +218,8 @@ const ESPN_SOCCER_SLUGS = {
   'MLS': 'usa.1',
   'Liga MX': 'mex.1',
   'Brazil Série A': 'bra.1', 'Brasileirao': 'bra.1',
+  'Brazil Série B': 'bra.2',
+  'FIFA World Cup': 'fifa.world',
   'UEFA Champions League': 'uefa.champions', 'Champions League': 'uefa.champions',
   'UEFA Europa League': 'uefa.europa', 'Europa League': 'uefa.europa',
   'UEFA Conference League': 'uefa.europa.conf', 'Conference League': 'uefa.europa.conf',
@@ -951,6 +953,23 @@ app.get('/debug-transfermarkt', async (req, res) => {
     const text = await resp.text();
     const hasTable = text.includes('table') && text.includes('items');
     res.json({ status: resp.status, length: text.length, hasTable, sample: text.slice(0, 500) });
+  } catch(e) { res.json({ error: e.message }); }
+});
+
+app.get('/test-espn-worldcup', async (req, res) => {
+  try {
+    const slug = 'fifa.world';
+    const [mexId, saId] = await Promise.all([
+      findESPNSoccerTeam('Mexico', slug),
+      findESPNSoccerTeam('South Africa', slug),
+    ]);
+    const [mexForm, saForm, standings, h2h] = await Promise.all([
+      mexId ? getESPNSoccerForm(mexId, slug) : null,
+      saId ? getESPNSoccerForm(saId, slug) : null,
+      mexId ? getESPNSoccerStandings('Mexico', slug) : null,
+      (mexId && saId) ? getESPNSoccerH2H(mexId, saId, slug) : null,
+    ]);
+    res.json({ mexId, saId, mexForm, saForm, standings, h2h });
   } catch(e) { res.json({ error: e.message }); }
 });
 
